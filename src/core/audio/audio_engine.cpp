@@ -1,0 +1,284 @@
+#define NOMINMAX
+#define MINIAUDIO_IMPLEMENTATION
+#include "audio_engine.h"
+#include <iostream>
+#include <algorithm>
+
+namespace ncktv {
+
+AudioEngine* AudioEngine::s_instance = nullptr;
+
+AudioEngine* AudioEngine::instance() {
+    return s_instance;
+}
+
+// Static C-compatible callback passed to miniaudio device configuration
+static void maAudioCallback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uint32 frameCount) {
+    (void)pInput; // Unused input
+    auto* engine = static_cast<AudioEngine*>(pDevice->pUserData);
+    if (engine) {
+        engine->mixAudio(static_cast<float*>(pOutput), frameCount);
+    }
+}
+
+AudioEngine::AudioEngine(TimelineManager* timelineManager, QObject* parent)
+    : QObject(parent),
+      m_timelineManager(timelineManager),
+      m_syncTimer(new QTimer(this)) {
+    
+    s_instance = this;
+
+    // Configure miniaudio playback device
+    ma_device_config config = ma_device_config_init(ma_device_type_playback);
+    config.playback.format   = ma_format_f32; // Interleaved standard floats
+    config.playback.channels = 2;              // Stereo L/R channels
+    config.sampleRate        = 48000;          // Studio reference rate
+    config.dataCallback      = maAudioCallback;
+    config.pUserData         = this;
+
+    if (ma_device_init(nullptr, &config, &m_device) == MA_SUCCESS) {
+        m_deviceInitialized = true;
+    } else {
+        std::cerr << "[AudioEngine] Error: Could not initialize miniaudio device.\n";
+    }
+
+    // Set up high-resolution sync timer (60fps update interval)
+    m_syncTimer->setInterval(16); 
+    connect(m_syncTimer, &QTimer::timeout, this, &AudioEngine::updatePlayheadFromAudio);
+
+    // Track playhead moves done by user scrubbing to dynamically update playback samples
+    connect(m_timelineManager, &TimelineManager::currentPlayheadTimeChanged, this, [this]() {
+        if (!m_isPlaying.load()) {
+            qint64 currentMicroseconds = m_timelineManager->currentPlayheadTime();
+            m_playbackSample.store((currentMicroseconds * 48000) / 1000000);
+        }
+    });
+
+    // Automatically cache audio files loaded/added to the timeline tracks
+    connect(m_timelineManager->trackListModel(), &TrackListModel::trackAdded, this, [this](Track* track) {
+        auto wireClips = [this, track]() {
+            for (Clip* clip : track->clips()) {
+                if (clip->type() == Clip::Audio && !clip->sourceFile().isEmpty()) {
+                    preloadFile(clip->sourceFile());
+                }
+            }
+        };
+        connect(track, &Track::clipsChanged, this, wireClips);
+        wireClips();
+    });
+}
+
+AudioEngine::~AudioEngine() {
+    stop();
+    if (m_deviceInitialized) {
+        ma_device_uninit(&m_device);
+    }
+    clearCache();
+    if (s_instance == this) {
+        s_instance = nullptr;
+    }
+}
+
+void AudioEngine::setIsPlaying(bool playing) {
+    if (playing) {
+        play();
+    } else {
+        pause();
+    }
+}
+
+void AudioEngine::play() {
+    if (!m_deviceInitialized || m_isPlaying.load()) {
+        return;
+    }
+
+    // Synchronize playhead starting sample
+    qint64 currentMicroseconds = m_timelineManager->currentPlayheadTime();
+    m_playbackSample.store((currentMicroseconds * 48000) / 1000000);
+
+    m_isPlaying.store(true);
+    
+    // Start hardware playback device
+    if (ma_device_start(&m_device) != MA_SUCCESS) {
+        std::cerr << "[AudioEngine] Error: Failed to start playback device.\n";
+        m_isPlaying.store(false);
+        return;
+    }
+
+    m_syncTimer->start();
+    emit isPlayingChanged();
+}
+
+void AudioEngine::pause() {
+    if (!m_isPlaying.load()) {
+        return;
+    }
+
+    m_isPlaying.store(false);
+    m_syncTimer->stop();
+
+    // Pause hardware device thread
+    if (m_deviceInitialized) {
+        ma_device_stop(&m_device);
+    }
+
+    emit isPlayingChanged();
+}
+
+void AudioEngine::stop() {
+    pause();
+    m_timelineManager->setCurrentPlayheadTime(0);
+    m_playbackSample.store(0);
+}
+
+void AudioEngine::preloadFile(const QString& filePath) {
+    if (filePath.isEmpty() || m_audioCache.contains(filePath)) {
+        return;
+    }
+
+    AudioReader* reader = new AudioReader();
+    // Synchronously decode for robust initial integration
+    if (reader->decodeFile(filePath, 48000)) {
+        m_audioCache[filePath] = reader;
+    } else {
+        delete reader;
+    }
+}
+
+void AudioEngine::clearCache() {
+    qDeleteAll(m_audioCache);
+    m_audioCache.clear();
+}
+
+AudioReader* AudioEngine::getReader(const QString& filePath) const {
+    return m_audioCache.value(filePath, nullptr);
+}
+
+void AudioEngine::mixAudio(float* pOutput, unsigned int frameCount) {
+    // 1. Zero out raw speaker frame buffer
+    std::fill(pOutput, pOutput + frameCount * 2, 0.0f);
+
+    if (!m_isPlaying.load()) {
+        return;
+    }
+
+    qint64 startSample = m_playbackSample.load();
+    qint64 endSample = startSample + frameCount;
+
+    // Loop through tracks in parallel
+    for (Track* track : m_timelineManager->trackListModel()->tracks()) {
+        if (track->trackType() != Track::Audio) {
+            continue;
+        }
+
+        // Determine target volume
+        float targetVol = track->isMuted() ? 0.0f : track->volume();
+        float prevVol = m_prevVolumes.value(track->trackId(), targetVol);
+        m_prevVolumes[track->trackId()] = targetVol; // Keep track of current for next buffer pass
+
+        for (Clip* clip : track->clips()) {
+            // Translate clip timings to sample references
+            qint64 clipStartSample = (clip->startTime() * 48000) / 1000000;
+            qint64 clipEndSample = (clip->endTime() * 48000) / 1000000;
+
+            // Check sample-accurate boundary overlap
+            if (startSample < clipEndSample && clipStartSample < endSample) {
+                QString srcFile = clip->sourceFile();
+                if (!m_audioCache.contains(srcFile)) {
+                    continue; // Dynamic pre-load fail fallback
+                }
+
+                AudioReader* reader = m_audioCache[srcFile];
+                const auto& samples = reader->samples();
+                if (samples.empty()) {
+                    continue;
+                }
+
+                qint64 mixStart = (std::max)(startSample, clipStartSample);
+                qint64 mixEnd = (std::min)(endSample, clipEndSample);
+
+                unsigned int rampLen = (std::min)(frameCount, 256u);
+                float gainStep = (targetVol - prevVol) / static_cast<float>(rampLen);
+
+                for (qint64 s = mixStart; s < mixEnd; ++s) {
+                    qint64 outFrameIdx = s - startSample;
+                    
+                    qint64 sampleOffsetInClip = s - clipStartSample;
+                    qint64 srcStartSample = (clip->sourceStart() * 48000) / 1000000;
+                    qint64 srcFrameIdx = srcStartSample + sampleOffsetInClip;
+
+                    if (srcFrameIdx >= 0 && srcFrameIdx < reader->totalSamples()) {
+                        // Compute smoothed sample-accurate volume envelope ramp
+                        float gain = outFrameIdx < rampLen ? (prevVol + gainStep * outFrameIdx) : targetVol;
+
+                        // Mix left/right channels additively with smoothed gain factor
+                        pOutput[outFrameIdx * 2]     += samples[srcFrameIdx * 2] * gain;
+                        pOutput[outFrameIdx * 2 + 1] += samples[srcFrameIdx * 2 + 1] * gain;
+                    }
+                }
+            }
+        }
+    }
+
+    m_playbackSample.store(endSample);
+}
+
+void AudioEngine::mixOffline(float* pOutput, unsigned int frameCount, qint64 startSample) {
+    std::fill(pOutput, pOutput + frameCount * 2, 0.0f);
+
+    qint64 endSample = startSample + frameCount;
+
+    for (Track* track : m_timelineManager->trackListModel()->tracks()) {
+        if (track->trackType() != Track::Audio) {
+            continue;
+        }
+
+        float targetVol = track->isMuted() ? 0.0f : track->volume();
+
+        for (Clip* clip : track->clips()) {
+            qint64 clipStartSample = (clip->startTime() * 48000) / 1000000;
+            qint64 clipEndSample = (clip->endTime() * 48000) / 1000000;
+
+            if (startSample < clipEndSample && clipStartSample < endSample) {
+                QString srcFile = clip->sourceFile();
+                if (!m_audioCache.contains(srcFile)) {
+                    continue;
+                }
+
+                AudioReader* reader = m_audioCache[srcFile];
+                const auto& samples = reader->samples();
+                if (samples.empty()) {
+                    continue;
+                }
+
+                qint64 mixStart = (std::max)(startSample, clipStartSample);
+                qint64 mixEnd = (std::min)(endSample, clipEndSample);
+
+                for (qint64 s = mixStart; s < mixEnd; ++s) {
+                    qint64 outFrameIdx = s - startSample;
+                    
+                    qint64 sampleOffsetInClip = s - clipStartSample;
+                    qint64 srcStartSample = (clip->sourceStart() * 48000) / 1000000;
+                    qint64 srcFrameIdx = srcStartSample + sampleOffsetInClip;
+
+                    if (srcFrameIdx >= 0 && srcFrameIdx < reader->totalSamples()) {
+                        pOutput[outFrameIdx * 2]     += samples[srcFrameIdx * 2] * targetVol;
+                        pOutput[outFrameIdx * 2 + 1] += samples[srcFrameIdx * 2 + 1] * targetVol;
+                    }
+                }
+            }
+        }
+    }
+}
+
+void AudioEngine::updatePlayheadFromAudio() {
+    if (m_isPlaying.load()) {
+        qint64 currentSample = m_playbackSample.load();
+        qint64 microseconds = (currentSample * 1000000) / 48000;
+        
+        // Push microsecond updates to GUI thread smoothly
+        m_timelineManager->setCurrentPlayheadTime(microseconds);
+    }
+}
+
+} // namespace ncktv

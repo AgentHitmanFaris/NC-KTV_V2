@@ -1,0 +1,150 @@
+#pragma once
+
+#include <QObject>
+#include <QString>
+#include <QMap>
+#include "track.h"
+#include "models/track_list_model.h"
+#include "models/clip_list_model.h"
+
+namespace ncktv {
+
+class TimelineManager : public QObject {
+    Q_OBJECT
+
+    Q_PROPERTY(qint64 currentPlayheadTime READ currentPlayheadTime WRITE setCurrentPlayheadTime NOTIFY currentPlayheadTimeChanged)
+    Q_PROPERTY(qint64 totalDuration READ totalDuration WRITE setTotalDuration NOTIFY totalDurationChanged)
+    Q_PROPERTY(double fps READ fps WRITE setFps NOTIFY fpsChanged)
+    Q_PROPERTY(TrackListModel* trackListModel READ trackListModel CONSTANT)
+    Q_PROPERTY(bool isSeparating READ isSeparating NOTIFY isSeparatingChanged)
+    Q_PROPERTY(double separationProgress READ separationProgress NOTIFY separationProgressChanged)
+    Q_PROPERTY(QString separationStatusText READ separationStatusText NOTIFY separationStatusTextChanged)
+    Q_PROPERTY(bool isRendering READ isRendering NOTIFY isRenderingChanged)
+    Q_PROPERTY(double renderProgress READ renderProgress NOTIFY renderProgressChanged)
+    Q_PROPERTY(QString renderStatusText READ renderStatusText NOTIFY renderStatusTextChanged)
+    Q_PROPERTY(QString modelPath READ modelPath WRITE setModelPath NOTIFY modelPathChanged)
+    Q_PROPERTY(QStringList discoveredModels READ discoveredModels NOTIFY discoveredModelsChanged)
+    Q_PROPERTY(QStringList discoveredModelPaths READ discoveredModelPaths NOTIFY discoveredModelsChanged)
+    Q_PROPERTY(QString modelsDirPath READ modelsDirPath WRITE setModelsDirPath NOTIFY modelsDirPathChanged)
+
+public:
+    explicit TimelineManager(QObject* parent = nullptr);
+    virtual ~TimelineManager() override;
+
+    [[nodiscard]] QString modelPath() const { return m_modelPath; }
+    void setModelPath(const QString& path);
+
+    [[nodiscard]] QString modelsDirPath() const { return m_modelsDirPath; }
+    void setModelsDirPath(const QString& path);
+
+    [[nodiscard]] QStringList discoveredModels() const { return m_discoveredModels; }
+    [[nodiscard]] QStringList discoveredModelPaths() const { return m_discoveredModelPaths; }
+
+    Q_INVOKABLE void scanModelsDir();
+
+    [[nodiscard]] bool isSeparating() const { return m_isSeparating; }
+    [[nodiscard]] double separationProgress() const { return m_separationProgress; }
+    [[nodiscard]] QString separationStatusText() const { return m_separationStatusText; }
+
+    [[nodiscard]] bool isRendering() const { return m_isRendering; }
+    [[nodiscard]] double renderProgress() const { return m_renderProgress; }
+    [[nodiscard]] QString renderStatusText() const { return m_renderStatusText; }
+
+    // Getters and Setters
+    [[nodiscard]] qint64 currentPlayheadTime() const { return m_currentPlayheadTime; }
+    void setCurrentPlayheadTime(qint64 timeMicroseconds);
+
+    [[nodiscard]] qint64 totalDuration() const { return m_totalDuration; }
+    void setTotalDuration(qint64 durationMicroseconds);
+
+    [[nodiscard]] double fps() const { return m_fps; }
+    void setFps(double fpsValue);
+
+    [[nodiscard]] TrackListModel* trackListModel() const { return m_trackListModel; }
+
+    // Track Management
+    Q_INVOKABLE QString addTrack(int type, const QString& name);
+    Q_INVOKABLE bool removeTrack(const QString& trackId);
+    Q_INVOKABLE QObject* getClipModelForTrack(const QString& trackId);
+
+    // Timeline Operations
+    Q_INVOKABLE bool addClipToTrack(const QString& trackId, const QString& clipId, int type, qint64 startTime, qint64 duration, const QString& sourceFile = "", const QString& lyricText = "");
+    Q_INVOKABLE bool importLyricsFromFile(const QString& trackId, const QString& filePath);
+    Q_INVOKABLE bool splitClip(const QString& trackId, const QString& clipId, qint64 splitTimeMicroseconds);
+    Q_INVOKABLE void separateStems(const QString& clipId);
+    Q_INVOKABLE void separateStemsForFile(const QString& filePath);
+    Q_INVOKABLE void startExport(const QString& outputPath, int width, int height, int fps, int videoBitrate, int audioBitrate);
+    Q_INVOKABLE void cancelExport();
+    
+    // Snapping Engine
+    Q_INVOKABLE qint64 checkSnapping(const QString& excludeClipId, qint64 targetTimeMicroseconds, qint64 thresholdMicroseconds) const;
+    
+    // Collision Engine
+    Q_INVOKABLE qint64 checkCollisions(const QString& trackId, const QString& clipId, qint64 targetTimeMicroseconds) const;
+
+    // Timecode Utilities
+    Q_INVOKABLE [[nodiscard]] QString formatTimecode(qint64 microseconds) const;
+    Q_INVOKABLE [[nodiscard]] qint64 parseTimecode(const QString& timecode) const;
+    Q_INVOKABLE [[nodiscard]] qint64 timeToFrames(qint64 microseconds) const;
+    Q_INVOKABLE [[nodiscard]] qint64 framesToTime(qint64 frames) const;
+
+    // Project Serialization (.nctv JSON files)
+    Q_INVOKABLE bool saveProject(const QString& filePath);
+    Q_INVOKABLE bool loadProject(const QString& filePath);
+    Q_INVOKABLE void clearProject();
+
+signals:
+    void currentPlayheadTimeChanged();
+    void totalDurationChanged();
+    void fpsChanged();
+    void projectLoaded();
+    void projectCleared();
+    void isSeparatingChanged();
+    void separationProgressChanged();
+    void separationStatusTextChanged();
+    void isRenderingChanged();
+    void renderProgressChanged();
+    void renderStatusTextChanged();
+    void exportCompleted(const QString& outputPath);
+    void exportFailed(const QString& errorMessage);
+    void modelPathChanged();
+    void modelsDirPathChanged();
+    void discoveredModelsChanged();
+    void mediaSeparationCompleted(const QString& vocalsPath, const QString& instPath);
+
+private slots:
+    void onSeparationProgress(double fraction);
+    void onSeparationCompleted(const QString& clipId, const QString& vocalsPath, const QString& instPath);
+    void onSeparationFailed(const QString& clipId, const QString& errorMessage);
+    void onRenderProgress(double fraction);
+    void onRenderStatusText(const QString& text);
+    void onRenderCompleted(const QString& outputPath, const QString& videoCodec, const QString& audioCodec);
+    void onRenderFailed(const QString& errorMessage);
+
+private:
+    void recalculateTotalDuration();
+
+    qint64 m_currentPlayheadTime = 0; // In Microseconds
+    qint64 m_totalDuration = 0;       // In Microseconds
+    double m_fps = 30.0;              // Default NLE FPS
+
+    TrackListModel* m_trackListModel = nullptr;
+    QMap<QString, ClipListModel*> m_clipModels; // Managed Clip models per trackId
+
+    bool m_isSeparating = false;
+    double m_separationProgress = 0.0;
+    QString m_separationStatusText;
+    class StemSeparationWorker* m_separationWorker = nullptr;
+
+    bool m_isRendering = false;
+    double m_renderProgress = 0.0;
+    QString m_renderStatusText;
+    class RenderWorker* m_renderWorker = nullptr;
+
+    QString m_modelPath;
+    QString m_modelsDirPath;
+    QStringList m_discoveredModels;
+    QStringList m_discoveredModelPaths;
+};
+
+} // namespace ncktv
