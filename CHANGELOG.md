@@ -18,6 +18,9 @@ All notable changes to this project will be documented in this file.
 - Project Save and Load UI buttons and status text alerts.
 - Magnetic snapping to exactly 0s in the timeline snapping engine.
 - Real-time progress percentage updates and status text in both the Media Library panel and the Properties Panel during stem separation.
+- Automated auto-put logic to instantly place imported media files into compatible tracks at the current playhead time on the timeline.
+- Fully functional "+ VIDEO TRACK" creation button in the timeline control header.
+- Custom orange color accents and layout styling tags for Video Tracks inside the timeline lane headers.
 
 ### Changed
 - Refactored C++ `StemSeparator` spectrogram representations from pointer-chasing 3D vectors to flat 1D contiguous vectors to improve cache locality.
@@ -32,3 +35,4 @@ All notable changes to this project will be documented in this file.
 - Fixed playhead scrubbing lockups by directly writing to properties instead of using missing C++ setters as functions.
 - Corrected alignment of timeline ruler ticks and playhead lines by offsetting coordinates with the 180px track header boundary.
 - Fixed stem separation track duplication by searching for and reusing existing audio tracks.
+- Resolved video clip placement bugs where Video files incorrectly mapped to Audio tracks and could not be loaded into Video lanes.
