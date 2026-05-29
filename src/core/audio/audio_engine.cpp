@@ -79,6 +79,13 @@ AudioEngine::~AudioEngine() {
     }
 }
 
+void AudioEngine::setMasterVolume(float vol) {
+    if (m_masterVolume != vol) {
+        m_masterVolume = vol;
+        emit masterVolumeChanged();
+    }
+}
+
 void AudioEngine::setIsPlaying(bool playing) {
     if (playing) {
         play();
@@ -172,7 +179,7 @@ void AudioEngine::mixAudio(float* pOutput, unsigned int frameCount) {
         }
 
         // Determine target volume
-        float targetVol = track->isMuted() ? 0.0f : track->volume();
+        float targetVol = (track->isMuted() ? 0.0f : track->volume()) * m_masterVolume;
         float prevVol = m_prevVolumes.value(track->trackId(), targetVol);
         m_prevVolumes[track->trackId()] = targetVol; // Keep track of current for next buffer pass
 
@@ -233,7 +240,7 @@ void AudioEngine::mixOffline(float* pOutput, unsigned int frameCount, qint64 sta
             continue;
         }
 
-        float targetVol = track->isMuted() ? 0.0f : track->volume();
+        float targetVol = (track->isMuted() ? 0.0f : track->volume()) * m_masterVolume;
 
         for (Clip* clip : track->clips()) {
             qint64 clipStartSample = (clip->startTime() * 48000) / 1000000;

@@ -276,6 +276,7 @@ qint64 TimelineManager::checkSnapping(const QString& excludeClipId, qint64 targe
 
     // Collect list of all timeline snap anchor locations
     QList<qint64> snapPoints;
+    snapPoints.append(0LL); // Start of the timeline (0s)
     snapPoints.append(m_currentPlayheadTime);
 
     for (const Track* track : m_trackListModel->tracks()) {
@@ -676,8 +677,47 @@ void TimelineManager::onSeparationCompleted(const QString& clipId, const QString
         duration = 0; // C++ will auto-detect full length
     }
 
-    QString vocalsTrackId = addTrack(0, "Vocals (" + fileName + ")");
-    QString instTrackId = addTrack(0, "Instrumental (" + fileName + ")");
+    QString vocalsTrackId;
+    QString instTrackId;
+
+    // Search for existing matching audio tracks to reuse before making new ones
+    for (Track* t : m_trackListModel->tracks()) {
+        if (t->type() == Track::Audio) {
+            QString nameLower = t->name().toLower();
+            if (vocalsTrackId.isEmpty() && (nameLower.contains("vocals") || nameLower.contains("vocal"))) {
+                vocalsTrackId = t->trackId();
+            } else if (instTrackId.isEmpty() && (nameLower.contains("instrumental") || nameLower.contains("instrument") || nameLower.contains("bgm") || nameLower.contains("background"))) {
+                instTrackId = t->trackId();
+            }
+        }
+    }
+
+    // Fall back to creating new tracks if matching ones aren't found in timeline
+    if (vocalsTrackId.isEmpty()) {
+        vocalsTrackId = addTrack(0, "Vocals (" + fileName + ")");
+    } else {
+        // Clear any existing clips on the matched track to prevent collisions
+        Track* vTrack = m_trackListModel->getTrackById(vocalsTrackId);
+        if (vTrack && !vTrack->isLocked()) {
+            QList<Clip*> trackClips = vTrack->clips();
+            for (Clip* c : trackClips) {
+                vTrack->removeClip(c->clipId());
+            }
+        }
+    }
+
+    if (instTrackId.isEmpty()) {
+        instTrackId = addTrack(0, "Instrumental (" + fileName + ")");
+    } else {
+        // Clear any existing clips on the matched track to prevent collisions
+        Track* iTrack = m_trackListModel->getTrackById(instTrackId);
+        if (iTrack && !iTrack->isLocked()) {
+            QList<Clip*> trackClips = iTrack->clips();
+            for (Clip* c : trackClips) {
+                iTrack->removeClip(c->clipId());
+            }
+        }
+    }
 
     if (AudioEngine::instance()) {
         AudioEngine::instance()->preloadFile(vocalsPath);

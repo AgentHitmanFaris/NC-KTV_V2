@@ -9,6 +9,33 @@ Rectangle {
     border.width: 1
 
     property int selectedMediaIdx: -1
+    property string searchQuery: ""
+    property string filterType: "All"
+    property int matchingCount: 0
+
+    function updateMatchingCount() {
+        var count = 0;
+        for (var i = 0; i < mockFilesModel.count; ++i) {
+            var item = mockFilesModel.get(i);
+            if (!item) continue;
+            var matchesSearch = searchQuery === "" || item.name.toLowerCase().indexOf(searchQuery.toLowerCase()) !== -1;
+            var matchesFilter = filterType === "All" || item.type === filterType;
+            if (matchesSearch && matchesFilter) {
+                count++;
+            }
+        }
+        matchingCount = count;
+    }
+
+    onSearchQueryChanged: updateMatchingCount()
+    onFilterTypeChanged: updateMatchingCount()
+
+    Connections {
+        target: mockFilesModel
+        function onCountChanged() {
+            mediaBrowserRoot.updateMatchingCount();
+        }
+    }
 
     Connections {
         target: timelineManager
@@ -67,6 +94,67 @@ Rectangle {
             }
         }
 
+        // Search & Filter Panel
+        ColumnLayout {
+            Layout.fillWidth: true
+            spacing: 6
+
+            // Search Bar
+            TextField {
+                id: txtSearch
+                Layout.fillWidth: true
+                placeholderText: "🔍 Search media library..."
+                placeholderTextColor: "#5A5A6C"
+                color: rootWindow.colorTextPrimary
+                font.pixelSize: 11
+                
+                background: Rectangle {
+                    color: "#16161D"
+                    border.color: txtSearch.activeFocus ? rootWindow.colorAccentViolet : rootWindow.colorBorder
+                    border.width: 1
+                    radius: 4
+                }
+                
+                onTextChanged: mediaBrowserRoot.searchQuery = text
+            }
+
+            // Filter Tabs
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 4
+
+                Repeater {
+                    model: ["All", "Audio", "Video"]
+                    delegate: Button {
+                        id: btnFilter
+                        text: modelData.toUpperCase()
+                        Layout.fillWidth: true
+                        implicitHeight: 20
+                        
+                        property bool isActive: mediaBrowserRoot.filterType === modelData
+                        
+                        onClicked: mediaBrowserRoot.filterType = modelData
+                        
+                        background: Rectangle {
+                            color: btnFilter.isActive ? rootWindow.colorAccentViolet : (btnFilter.hovered ? "#222" : "#16161D")
+                            radius: 3
+                            border.color: btnFilter.isActive ? "#A27FFF" : rootWindow.colorBorder
+                            border.width: 1
+                        }
+                        
+                        contentItem: Text {
+                            text: btnFilter.text
+                            font.bold: true
+                            font.pixelSize: 8
+                            color: btnFilter.isActive ? "#FFF" : rootWindow.colorTextSecondary
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                    }
+                }
+            }
+        }
+
         // Mock files library list
         ListModel {
             id: mockFilesModel
@@ -78,7 +166,7 @@ Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
             color: "transparent"
-            visible: mockFilesModel.count === 0
+            visible: mediaBrowserRoot.matchingCount === 0
 
             ColumnLayout {
                 anchors.centerIn: parent
@@ -86,13 +174,13 @@ Rectangle {
                 width: parent.width - 40
 
                 Label {
-                    text: "📁"
+                    text: mockFilesModel.count === 0 ? "📁" : "🔍"
                     font.pixelSize: 32
                     Layout.alignment: Qt.AlignCenter
                 }
 
                 Label {
-                    text: "Media Library is Empty"
+                    text: mockFilesModel.count === 0 ? "Media Library is Empty" : "No Matching Media Files"
                     font.bold: true
                     font.pixelSize: 13
                     color: rootWindow.colorTextPrimary
@@ -100,7 +188,9 @@ Rectangle {
                 }
 
                 Label {
-                    text: "Import audio backing tracks, vocals, or video guides to begin crafting your karaoke project."
+                    text: mockFilesModel.count === 0 ? 
+                          "Import audio backing tracks, vocals, or video guides to begin crafting your karaoke project." : 
+                          "Try typing a different name or checking your filter tabs above."
                     font.pixelSize: 10
                     color: rootWindow.colorTextSecondary
                     wrapMode: Text.WordWrap
@@ -117,12 +207,20 @@ Rectangle {
             model: mockFilesModel
             clip: true
             spacing: 6
-            visible: mockFilesModel.count > 0
+            visible: mediaBrowserRoot.matchingCount > 0
 
             delegate: Rectangle {
                 id: fileDelegate
                 width: fileListView.width
-                height: 52
+                
+                property bool matchesSearch: mediaBrowserRoot.searchQuery === "" || name.toLowerCase().indexOf(mediaBrowserRoot.searchQuery.toLowerCase()) !== -1
+                property bool matchesFilter: mediaBrowserRoot.filterType === "All" || type === mediaBrowserRoot.filterType
+                property bool isMatch: matchesSearch && matchesFilter
+                
+                visible: isMatch
+                height: isMatch ? 52 : 0
+                clip: true
+                
                 color: (mediaBrowserRoot.selectedMediaIdx === index) ? "#211B35" : (delegateHover.hovered ? rootWindow.colorBgCard : "#15151D")
                 border.color: (mediaBrowserRoot.selectedMediaIdx === index) ? rootWindow.colorAccentGreen : (delegateHover.hovered ? rootWindow.colorAccentViolet : rootWindow.colorBorder)
                 border.width: (mediaBrowserRoot.selectedMediaIdx === index) ? 2 : 1
@@ -441,7 +539,7 @@ Rectangle {
                     id: btnProcessAI
                     text: {
                         if (timelineManager.isSeparating) {
-                            return "SEPARATING STEMS...";
+                            return "SEPARATING STEMS (" + Math.round(timelineManager.separationProgress * 100) + "%)...";
                         }
                         if (propertiesPanel.selectedClip && propertiesPanel.selectedClip.clipType === 0) {
                             return "PROCESS SELECTED TIMELINE CLIP";
@@ -492,23 +590,45 @@ Rectangle {
                     }
                 }
 
-                ProgressBar {
-                    id: aiProgress
+                ColumnLayout {
                     Layout.fillWidth: true
-                    implicitHeight: 4
-                    value: timelineManager.separationProgress
                     visible: timelineManager.isSeparating || timelineManager.separationProgress > 0
+                    spacing: 4
 
-                    background: Rectangle {
-                        color: "#2C203E"
-                        radius: 2
-                    }
-                    contentItem: Item {
-                        Rectangle {
-                            width: aiProgress.visualPosition * parent.width
-                            height: parent.height
-                            radius: 2
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label {
+                            text: timelineManager.separationStatusText
+                            font.pixelSize: 9
+                            color: rootWindow.colorTextSecondary
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                        }
+                        Label {
+                            text: Math.round(timelineManager.separationProgress * 100) + "%"
+                            font.pixelSize: 9
+                            font.bold: true
                             color: rootWindow.colorAccentGreen
+                        }
+                    }
+
+                    ProgressBar {
+                        id: aiProgress
+                        Layout.fillWidth: true
+                        implicitHeight: 4
+                        value: timelineManager.separationProgress
+
+                        background: Rectangle {
+                            color: "#2C203E"
+                            radius: 2
+                        }
+                        contentItem: Item {
+                            Rectangle {
+                                width: aiProgress.visualPosition * parent.width
+                                height: parent.height
+                                radius: 2
+                                color: rootWindow.colorAccentGreen
+                            }
                         }
                     }
                 }

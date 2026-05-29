@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 import ncktv.core 1.0
 
 Rectangle {
@@ -8,7 +9,7 @@ Rectangle {
     // Position and size calculations based on microsecond properties
     x: (clipData ? clipData.startTime / 1000000.0 : 0.0) * zoomFactor
     width: (clipData ? clipData.duration / 1000000.0 : 1.0) * zoomFactor
-    height: 74
+    height: parent ? parent.height - 16 : 74
     anchors.verticalCenter: parent.verticalCenter
     radius: 6
 
@@ -19,6 +20,7 @@ Rectangle {
 
     // Design states
     property bool isSelected: propertiesPanel.selectedClip === clipItemRoot.clipData
+    property bool isActiveManipulating: dragArea.isDragging || dragLeftArea.pressed || dragRightArea.pressed
     
     color: {
         if (!clipData) return "#2A2A35";
@@ -55,61 +57,7 @@ Rectangle {
     }
 
     // Progressive Syllable-Level Karaoke Sweep for Lyric Tracks (clipType = 2)
-    property double sweepProgress: {
-        if (!clipData || clipData.clipType !== 2) return 0.0;
-        return calculateSweepProgress(timelineManager.currentPlayheadTime);
-    }
-
-    function calculateSweepProgress(currentPlayheadTimeUs) {
-        if (!clipData || clipData.clipType !== 2 || clipData.syllables.length === 0) {
-            return 0.0;
-        }
-        
-        var relativePlayheadUs = currentPlayheadTimeUs - clipData.startTime;
-        
-        if (relativePlayheadUs <= 0) {
-            return 0.0;
-        }
-        if (relativePlayheadUs >= clipData.duration) {
-            return 1.0;
-        }
-        
-        var totalSyllables = clipData.syllables.length;
-        var fullText = clipData.lyricText;
-        var totalChars = fullText.length;
-        if (totalChars === 0) return 0.0;
-        
-        // Precompute characters per syllable offset
-        var charOffsets = [];
-        var charCount = 0;
-        for (var i = 0; i < totalSyllables; ++i) {
-            charOffsets.push(charCount);
-            charCount += clipData.syllables[i].text.length;
-        }
-        
-        // Find current syllable timing slot
-        for (var i = 0; i < totalSyllables; ++i) {
-            var syl = clipData.syllables[i];
-            var sStart = syl.relativeStart;
-            var sDuration = syl.duration;
-            var sEnd = sStart + sDuration;
-            
-            var sylCharOffset = charOffsets[i];
-            var sylCharLen = syl.text.length;
-            
-            if (relativePlayheadUs >= sStart && relativePlayheadUs <= sEnd) {
-                // Precise microsecond fractional progress inside the active syllable
-                var sylProgress = (relativePlayheadUs - sStart) / sDuration;
-                var activeChars = sylCharOffset + (sylCharLen * sylProgress);
-                return activeChars / totalChars;
-            } else if (relativePlayheadUs < sStart) {
-                // Word separation gap
-                return sylCharOffset / totalChars;
-            }
-        }
-        
-        return 1.0;
-    }
+    property double sweepProgress: rootWindow.calculateClipSweepProgress(clipData, timelineManager.currentPlayheadTime)
 
     // Clip label details and UI Layout
     Column {
@@ -201,7 +149,7 @@ Rectangle {
         }
     }
 
-    // Horizontal dragging with snap & collision checks
+    // Horizontal dragging with snap & collision checks (offloaded to QML's native drag target for 60fps performance)
     MouseArea {
         id: dragArea
         anchors.fill: parent
@@ -209,29 +157,23 @@ Rectangle {
         anchors.rightMargin: 12
         cursorShape: Qt.SizeAll
 
-        property real startDragX: 0
-        property bool isDragging: false
+        drag.target: clipItemRoot
+        drag.axis: Drag.XAxis
 
         onPressed: (mouse) => {
             if (parentTrack && parentTrack.isLocked) {
                 mouse.accepted = false;
                 return;
             }
-            startDragX = mouse.x;
-            isDragging = true;
             propertiesPanel.selectedClip = clipItemRoot.clipData;
             propertiesPanel.selectedTrack = clipItemRoot.parentTrack;
         }
 
-        onPositionChanged: (mouse) => {
-            if (!isDragging || !clipData) return;
+        onReleased: {
+            if (!clipData) return;
             
-            // Calculate target position shift in pixels
-            var dx = mouse.x - startDragX;
-            var targetX = clipItemRoot.x + dx;
-            
-            // Map target x coordinate to start time in microseconds
-            var targetStartTimeUs = (targetX / zoomFactor) * 1000000.0;
+            // Calculate target start time from the final drag position
+            var targetStartTimeUs = (clipItemRoot.x / zoomFactor) * 1000000.0;
             if (targetStartTimeUs < 0) targetStartTimeUs = 0;
 
             // 1. Snapping engine calculations
@@ -240,17 +182,18 @@ Rectangle {
                 targetStartTimeUs = timelineManager.checkSnapping(clipData.clipId, targetStartTimeUs, thresholdUs);
             }
 
-            // 2. Overlap/Collision blocking: prevents dragging past same-track adjacent clip bounds
+            // 2. Overlap/Collision blocking
             if (parentTrack) {
                 targetStartTimeUs = timelineManager.checkCollisions(parentTrack.trackId, clipData.clipId, targetStartTimeUs);
             }
 
-            // Write change back to C++ models
-            clipData.startTime = targetStartTimeUs;
-        }
-
-        onReleased: {
-            isDragging = false;
+            // Write change back to C++ model (triggers track update)
+            clipData.startTime = Math.round(targetStartTimeUs);
+            
+            // Restore coordinate binding to sync future updates automatically
+            clipItemRoot.x = Qt.binding(function() { 
+                return (clipData ? clipData.startTime / 1000000.0 : 0.0) * zoomFactor; 
+            });
         }
     }
 
@@ -270,46 +213,67 @@ Rectangle {
             drag.target: null
             cursorShape: Qt.SizeHorCursor
 
-            property real startDragX: 0
+            property real startMouseX: 0
+            property real originalX: 0
+            property real originalWidth: 0
 
             onPressed: (mouse) => {
-                startDragX = mouse.x;
+                var parentPos = mapToItem(clipItemRoot.parent, mouse.x, mouse.y);
+                startMouseX = parentPos.x;
+                originalX = clipItemRoot.x;
+                originalWidth = clipItemRoot.width;
             }
 
             onPositionChanged: (mouse) => {
                 if (!clipData) return;
-                var dx = mouse.x - startDragX;
-                var dxUs = (dx / zoomFactor) * 1000000.0;
+                var parentPos = mapToItem(clipItemRoot.parent, mouse.x, mouse.y);
+                var dx = parentPos.x - startMouseX;
                 
-                var oldStart = clipData.startTime;
-                var oldDuration = clipData.duration;
+                var targetX = originalX + dx;
+                var targetW = originalWidth - dx;
                 
-                var newStart = oldStart + dxUs;
-                var newDuration = oldDuration - dxUs;
+                var minWidthPx = 0.1 * zoomFactor; // 100ms minimum width
+                if (targetX >= 0 && targetW >= minWidthPx) {
+                    clipItemRoot.x = targetX;
+                    clipItemRoot.width = targetW;
+                }
+            }
+
+            onReleased: {
+                if (!clipData) return;
                 
-                if (newStart >= 0 && newDuration > 100000) { // At least 100ms long
-                    // Enforce same-track collision safety when resizing left
-                    if (parentTrack) {
-                        // Find the closest clip ending before oldStart
-                        var closestLeftClipEnd = -1;
-                        for (var i = 0; i < parentTrack.clips().length; ++i) {
-                            var c = parentTrack.clips()[i];
-                            if (c.clipId === clipData.clipId) continue;
-                            if (c.endTime <= oldStart) {
-                                if (closestLeftClipEnd === -1 || c.endTime > closestLeftClipEnd) {
-                                    closestLeftClipEnd = c.endTime;
-                                }
+                var targetStartTimeUs = (clipItemRoot.x / zoomFactor) * 1000000.0;
+                var targetDurationUs = (clipItemRoot.width / zoomFactor) * 1000000.0;
+                
+                // Enforce same-track collision safety when resizing left
+                if (parentTrack) {
+                    var closestLeftClipEnd = -1;
+                    for (var i = 0; i < parentTrack.clips().length; ++i) {
+                        var c = parentTrack.clips()[i];
+                        if (c.clipId === clipData.clipId) continue;
+                        if (c.endTime <= clipData.startTime) {
+                            if (closestLeftClipEnd === -1 || c.endTime > closestLeftClipEnd) {
+                                closestLeftClipEnd = c.endTime;
                             }
                         }
-                        if (closestLeftClipEnd !== -1 && newStart < closestLeftClipEnd) {
-                            newStart = closestLeftClipEnd;
-                            newDuration = oldStart + oldDuration - newStart;
-                        }
                     }
-
-                    clipData.startTime = newStart;
-                    clipData.duration = newDuration;
+                    if (closestLeftClipEnd !== -1 && targetStartTimeUs < closestLeftClipEnd) {
+                        targetStartTimeUs = closestLeftClipEnd;
+                        targetDurationUs = (clipData.startTime + clipData.duration) - targetStartTimeUs;
+                    }
                 }
+                
+                // Write back to C++ once
+                clipData.startTime = Math.round(targetStartTimeUs);
+                clipData.duration = Math.round(targetDurationUs);
+                
+                // Restore coordinate bindings to ensure they sync automatically
+                clipItemRoot.x = Qt.binding(function() { 
+                    return (clipData ? clipData.startTime / 1000000.0 : 0.0) * zoomFactor; 
+                });
+                clipItemRoot.width = Qt.binding(function() { 
+                    return (clipData ? clipData.duration / 1000000.0 : 1.0) * zoomFactor; 
+                });
             }
         }
     }
@@ -330,40 +294,100 @@ Rectangle {
             drag.target: null
             cursorShape: Qt.SizeHorCursor
 
-            property real startDragX: 0
+            property real startMouseX: 0
+            property real originalWidth: 0
 
             onPressed: (mouse) => {
-                startDragX = mouse.x;
+                var parentPos = mapToItem(clipItemRoot.parent, mouse.x, mouse.y);
+                startMouseX = parentPos.x;
+                originalWidth = clipItemRoot.width;
             }
 
             onPositionChanged: (mouse) => {
                 if (!clipData) return;
-                var dx = mouse.x - startDragX;
-                var dxUs = (dx / zoomFactor) * 1000000.0;
+                var parentPos = mapToItem(clipItemRoot.parent, mouse.x, mouse.y);
+                var dx = parentPos.x - startMouseX;
                 
-                var oldStart = clipData.startTime;
-                var newDuration = clipData.duration + dxUs;
+                var targetW = originalWidth + dx;
+                var minWidthPx = 0.1 * zoomFactor; // 100ms minimum width
+                if (targetW >= minWidthPx) {
+                    clipItemRoot.width = targetW;
+                }
+            }
+
+            onReleased: {
+                if (!clipData) return;
+                var targetDurationUs = (clipItemRoot.width / zoomFactor) * 1000000.0;
                 
-                if (newDuration > 100000) { // At least 100ms long
-                    // Enforce same-track collision safety when resizing right
-                    if (parentTrack) {
-                        var closestRightClipStart = -1;
-                        for (var i = 0; i < parentTrack.clips().length; ++i) {
-                            var c = parentTrack.clips()[i];
-                            if (c.clipId === clipData.clipId) continue;
-                            if (c.startTime >= oldStart + clipData.duration) {
-                                if (closestRightClipStart === -1 || c.startTime < closestRightClipStart) {
-                                    closestRightClipStart = c.startTime;
-                                }
+                // Enforce same-track collision safety when resizing right
+                if (parentTrack) {
+                    var closestRightClipStart = -1;
+                    for (var i = 0; i < parentTrack.clips().length; ++i) {
+                        var c = parentTrack.clips()[i];
+                        if (c.clipId === clipData.clipId) continue;
+                        if (c.startTime >= clipData.startTime) {
+                            if (closestRightClipStart === -1 || c.startTime < closestRightClipStart) {
+                                closestRightClipStart = c.startTime;
                             }
                         }
-                        if (closestRightClipStart !== -1 && (oldStart + newDuration) > closestRightClipStart) {
-                            newDuration = closestRightClipStart - oldStart;
-                        }
                     }
-
-                    clipData.duration = newDuration;
+                    if (closestRightClipStart !== -1 && (clipData.startTime + targetDurationUs) > closestRightClipStart) {
+                        targetDurationUs = closestRightClipStart - clipData.startTime;
+                    }
                 }
+                
+                // Write back to C++ once
+                clipData.duration = Math.round(targetDurationUs);
+                
+                // Restore coordinate binding to sync future updates automatically
+                clipItemRoot.width = Qt.binding(function() { 
+                    return (clipData ? clipData.duration / 1000000.0 : 1.0) * zoomFactor; 
+                });
+            }
+        }
+    }
+
+    // Real-time timecode overlay tooltip
+    Rectangle {
+        id: timecodeTooltip
+        visible: clipItemRoot.isActiveManipulating && clipData !== null
+        anchors.bottom: parent.top
+        anchors.bottomMargin: 6
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: tooltipLayout.implicitWidth + 16
+        height: 24
+        color: "#1E1A30"
+        border.color: rootWindow.colorAccentViolet
+        border.width: 1
+        radius: 4
+        z: 99
+        
+        RowLayout {
+            id: tooltipLayout
+            anchors.centerIn: parent
+            spacing: 4
+            Label {
+                text: dragLeftArea.pressed ? "Trim L: " : (dragRightArea.pressed ? "Trim R: " : "Start: ")
+                font.pixelSize: 9
+                font.bold: true
+                color: rootWindow.colorAccentGreen
+            }
+            Label {
+                text: {
+                    if (!clipData) return "";
+                    var currentX = clipItemRoot.x;
+                    var currentW = clipItemRoot.width;
+                    if (dragRightArea.pressed) {
+                        var visualEndTimeUs = ((currentX + currentW) / zoomFactor) * 1000000.0;
+                        return timelineManager.formatTimecode(visualEndTimeUs);
+                    }
+                    var visualStartTimeUs = (currentX / zoomFactor) * 1000000.0;
+                    return timelineManager.formatTimecode(visualStartTimeUs);
+                }
+                font.pixelSize: 9
+                font.bold: true
+                color: "#FFF"
+                font.family: "Courier New"
             }
         }
     }

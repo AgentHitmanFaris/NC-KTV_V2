@@ -11,14 +11,17 @@ Rectangle {
     // Global timeline zoom configuration (pixels per millisecond / microsecond)
     // Zoom factor: width in pixels of 1 second (1,000,000 microseconds)
     property double zoomFactor: 120.0 
+    property bool compactTracks: false
     
     // Snapping configuration
     property bool snappingEnabled: true
     property double snapThresholdMs: 100.0 // 100 milliseconds threshold
 
-    // Microsecond timing coordinates mapper
+    property real scrollX: timelineScroll.contentItem ? timelineScroll.contentItem.contentX : 0.0
+
+    // Microsecond timing coordinates mapper (converted to rounded integer for qlonglong matching)
     function xToTime(x) {
-        return (x / zoomFactor) * 1000000.0;
+        return Math.round((x / zoomFactor) * 1000000.0);
     }
 
     function timeToX(timeUs) {
@@ -53,20 +56,20 @@ Rectangle {
                 // Snap switch button
                 Button {
                     id: btnSnapToggle
-                    text: snappingEnabled ? "SNAP ON" : "SNAP OFF"
+                    text: timelineRoot.snappingEnabled ? "SNAP ON" : "SNAP OFF"
                     implicitWidth: 80
                     implicitHeight: 22
-                    onClicked: snappingEnabled = !snappingEnabled
+                    onClicked: timelineRoot.snappingEnabled = !timelineRoot.snappingEnabled
                     background: Rectangle {
-                        color: snappingEnabled ? "#1F3320" : "#331F20"
+                        color: timelineRoot.snappingEnabled ? "#1F3320" : "#331F20"
                         radius: 3
-                        border.color: snappingEnabled ? rootWindow.colorAccentGreen : "#FF5252"
+                        border.color: timelineRoot.snappingEnabled ? rootWindow.colorAccentGreen : "#FF5252"
                     }
                     contentItem: Text {
                         text: btnSnapToggle.text
                         font.pixelSize: 9
                         font.bold: true
-                        color: snappingEnabled ? rootWindow.colorAccentGreen : "#FF5252"
+                        color: timelineRoot.snappingEnabled ? rootWindow.colorAccentGreen : "#FF5252"
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
                     }
@@ -142,21 +145,84 @@ Rectangle {
                 // Spacer
                 Item { Layout.fillWidth: true }
 
+                // Compact track height toggle
+                Button {
+                    id: btnCompactToggle
+                    text: timelineRoot.compactTracks ? "COMPACT LAYOUT" : "STANDARD LAYOUT"
+                    implicitWidth: 110
+                    implicitHeight: 22
+                    onClicked: timelineRoot.compactTracks = !timelineRoot.compactTracks
+                    background: Rectangle {
+                        color: timelineRoot.compactTracks ? "#2D264A" : rootWindow.colorBgCard
+                        radius: 3
+                        border.color: timelineRoot.compactTracks ? rootWindow.colorAccentViolet : rootWindow.colorBorder
+                    }
+                    contentItem: Text {
+                        text: btnCompactToggle.text
+                        font.pixelSize: 9
+                        font.bold: true
+                        color: timelineRoot.compactTracks ? "#FFF" : rootWindow.colorTextSecondary
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+
                 // Timeline Zoom Controls
                 RowLayout {
-                    spacing: 6
+                    spacing: 4
                     Label {
                         text: "Zoom"
                         color: rootWindow.colorTextSecondary
                         font.pixelSize: 11
                     }
+                    
+                    // Zoom Out Button
+                    Button {
+                        id: btnZoomOut
+                        text: "➖"
+                        implicitWidth: 20
+                        implicitHeight: 20
+                        onClicked: zoomFactor = Math.max(20.0, zoomFactor - 20.0)
+                        background: Rectangle {
+                            color: btnZoomOut.hovered ? "#222" : "transparent"
+                            radius: 3
+                        }
+                        contentItem: Text {
+                            text: btnZoomOut.text
+                            font.pixelSize: 8
+                            color: "#FFF"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                    }
+
                     Slider {
                         id: zoomSlider
                         from: 20
                         to: 500
                         value: zoomFactor
-                        implicitWidth: 150
+                        implicitWidth: 110
                         onMoved: zoomFactor = value
+                    }
+
+                    // Zoom In Button
+                    Button {
+                        id: btnZoomIn
+                        text: "➕"
+                        implicitWidth: 20
+                        implicitHeight: 20
+                        onClicked: zoomFactor = Math.min(500.0, zoomFactor + 20.0)
+                        background: Rectangle {
+                            color: btnZoomIn.hovered ? "#222" : "transparent"
+                            radius: 3
+                        }
+                        contentItem: Text {
+                            text: btnZoomIn.text
+                            font.pixelSize: 8
+                            color: "#FFF"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
                     }
                 }
             }
@@ -173,7 +239,7 @@ Rectangle {
 
             // Wrap inside clip area
             Item {
-                implicitWidth: Math.max(timelineScroll.width, timeToX(timelineManager.totalDuration) + 300)
+                implicitWidth: Math.max(timelineScroll.width, 180 + timeToX(timelineManager.totalDuration) + 300)
                 implicitHeight: tracksColumn.implicitHeight + timeRuler.height + 50
 
                 // Ruler Click / Scrub Canvas Area
@@ -191,12 +257,23 @@ Rectangle {
                         onPaint: {
                             var ctx = getContext("2d");
                             ctx.clearRect(0, 0, width, height);
+
+                            // Draw solid background for the left track header area
+                            ctx.fillStyle = rootWindow.colorBgCard;
+                            ctx.fillRect(0, 0, 180, height);
+
                             ctx.strokeStyle = rootWindow.colorBorder;
                             ctx.fillStyle = rootWindow.colorTextSecondary;
                             ctx.font = "8px sans-serif";
                             ctx.lineWidth = 1;
 
-                            // Draw seconds ticks
+                            // Draw a vertical divider separating the header block from the time ruler grid
+                            ctx.beginPath();
+                            ctx.moveTo(180, 0);
+                            ctx.lineTo(180, height);
+                            ctx.stroke();
+
+                            // Draw seconds ticks starting at x = 180
                             var totalWidth = width;
                             var interval = zoomFactor; // 1 second intervals in pixels
                             
@@ -205,8 +282,8 @@ Rectangle {
                             if (zoomFactor < 40) step = 5;
                             else if (zoomFactor < 80) step = 2;
 
-                            for (var x = 0; x < totalWidth; x += interval * step) {
-                                var sec = Math.round(x / zoomFactor);
+                            for (var x = 180; x < totalWidth; x += interval * step) {
+                                var sec = Math.round((x - 180) / zoomFactor);
                                 ctx.beginPath();
                                 ctx.moveTo(x, 15);
                                 ctx.lineTo(x, 28);
@@ -216,16 +293,38 @@ Rectangle {
                         }
                     }
 
-                    // Click or Drag gesture on the time ruler to scrub playhead
+                    // Header cover for the ruler (stationary horizontally)
+                    Rectangle {
+                        x: timelineRoot.scrollX
+                        y: 0
+                        width: 180
+                        height: parent.height
+                        color: rootWindow.colorBgCard
+                        border.color: rootWindow.colorBorder
+                        border.width: 1
+                        z: 6
+
+                        Label {
+                            anchors.centerIn: parent
+                            text: "TRACKS"
+                            font.bold: true
+                            font.pixelSize: 10
+                            color: rootWindow.colorTextSecondary
+                        }
+                    }
+
+                    // Click or Drag gesture on the time ruler to scrub playhead (clamped to starting at x = 180 + contentX)
                     MouseArea {
                         anchors.fill: parent
                         onPressed: (mouse) => {
-                            var timeUs = xToTime(mouse.x);
-                            timelineManager.setCurrentPlayheadTime(Math.max(0, timeUs));
+                            var posX = Math.max(180 + timelineRoot.scrollX, mouse.x);
+                            var timeUs = xToTime(posX - 180);
+                            timelineManager.currentPlayheadTime = Math.max(0, timeUs);
                         }
                         onPositionChanged: (mouse) => {
-                            var timeUs = xToTime(mouse.x);
-                            timelineManager.setCurrentPlayheadTime(Math.max(0, timeUs));
+                            var posX = Math.max(180 + timelineRoot.scrollX, mouse.x);
+                            var timeUs = xToTime(posX - 180);
+                            timelineManager.currentPlayheadTime = Math.max(0, timeUs);
                         }
                     }
                 }
@@ -249,6 +348,8 @@ Rectangle {
                             trackMuted: model.trackMuted
                             trackLocked: model.trackLocked
                             zoom: zoomFactor
+                            height: timelineRoot.compactTracks ? 60 : 90
+                            scrollX: timelineRoot.scrollX
                         }
                     }
                 }
@@ -256,12 +357,12 @@ Rectangle {
                 // Visual Playhead Line Indicator with smooth glide rendering
                 Rectangle {
                     id: playheadLine
-                    x: timeToX(timelineManager.currentPlayheadTime)
+                    x: 180 + timeToX(timelineManager.currentPlayheadTime)
                     y: 0
                     width: 2
                     height: parent.height
                     color: rootWindow.colorAccentGreen
-                    z: 10
+                    z: 4 // Render on top of clips (default z:0) but behind track headers (z:5) and ruler cover (z:6)
 
                     // Neon triangle cap
                     Rectangle {

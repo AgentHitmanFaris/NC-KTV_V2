@@ -181,6 +181,16 @@ void Clip::parseLrcSyllables(const QString& rawLrc) {
     emit syllablesChanged();
 }
 
+void Clip::updateSyllable(int index, qint64 relativeStart, qint64 duration) {
+    if (index >= 0 && index < m_syllables.size()) {
+        QVariantMap syl = m_syllables[index].toMap();
+        syl["relativeStart"] = relativeStart;
+        syl["duration"] = duration;
+        m_syllables[index] = syl;
+        emit syllablesChanged();
+    }
+}
+
 void Clip::autoGenerateSyllables() {
     m_syllables.clear();
     if (m_lyricText.isEmpty() || m_duration <= 0) {

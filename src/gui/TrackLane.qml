@@ -7,9 +7,18 @@ Rectangle {
     id: trackLaneRoot
     width: parent ? parent.width : 1000
     height: 90
-    color: rootWindow.colorBgPanel
-    border.color: rootWindow.colorBorder
-    border.width: 1
+    color: (propertiesPanel.selectedTrack === trackLaneRoot.trackData) ? "#14141E" : rootWindow.colorBgPanel
+    border.color: (propertiesPanel.selectedTrack === trackLaneRoot.trackData) ? rootWindow.colorAccentViolet : rootWindow.colorBorder
+    border.width: (propertiesPanel.selectedTrack === trackLaneRoot.trackData) ? 2 : 1
+
+    MouseArea {
+        anchors.fill: parent
+        z: -2
+        onPressed: {
+            propertiesPanel.selectedTrack = trackLaneRoot.trackData;
+            propertiesPanel.selectedClip = null;
+        }
+    }
 
     property var trackData: null // C++ Track* pointer passed from parent
     property string trackName: ""
@@ -17,6 +26,7 @@ Rectangle {
     property bool trackMuted: false
     property bool trackLocked: false
     property double zoom: 120.0
+    property real scrollX: 0.0
 
     // ClipListModel bound specifically to this trackData
     ClipListModel {
@@ -24,14 +34,14 @@ Rectangle {
         track: trackLaneRoot.trackData
     }
 
-    RowLayout {
-        anchors.fill: parent
-        spacing: 0
-
-        // 1. Left Track Header Controls Area
+        // 1. Left Track Header Controls Area (Stationary horizontally)
         Rectangle {
-            Layout.preferredWidth: 180
-            Layout.fillHeight: true
+            id: trackHeader
+            x: trackLaneRoot.scrollX
+            y: 0
+            width: 180
+            height: parent.height
+            z: 5
             color: rootWindow.colorBgCard
             border.color: rootWindow.colorBorder
             border.width: 1
@@ -144,7 +154,48 @@ Rectangle {
                     }
                 }
 
-                Item { Layout.fillHeight: true }
+                // Volume Slider (only for Audio track and if height is not compact)
+                RowLayout {
+                    visible: trackType === 0 && trackLaneRoot.height > 65
+                    spacing: 6
+                    Layout.fillWidth: true
+                    Label {
+                        text: "Vol:"
+                        font.pixelSize: 9
+                        color: rootWindow.colorTextSecondary
+                    }
+                    Slider {
+                        id: volSlider
+                        Layout.fillWidth: true
+                        from: 0.0
+                        to: 1.0
+                        value: trackData ? trackData.volume : 1.0
+                        onMoved: {
+                            if (trackData) {
+                                trackData.volume = value;
+                            }
+                        }
+                        background: Rectangle {
+                            implicitHeight: 3
+                            color: "#1B1B22"
+                            radius: 1.5
+                            Rectangle {
+                                width: volSlider.visualPosition * parent.width
+                                height: parent.height
+                                color: rootWindow.colorAccentViolet
+                                radius: 1.5
+                            }
+                        }
+                        handle: Rectangle {
+                            x: volSlider.visualPosition * (volSlider.width - width)
+                            y: (volSlider.height - height) / 2
+                            width: 8
+                            height: 8
+                            radius: 4
+                            color: volSlider.hovered ? "#FFF" : rootWindow.colorAccentViolet
+                        }
+                    }
+                }
 
                 // Buttons: Mute / Lock / Delete
                 RowLayout {
@@ -232,10 +283,13 @@ Rectangle {
             }
         }
 
-        // 2. Right Canvas Area: Render visual draggable clips
+        // 2. Right Canvas Area: Render visual draggable clips (Scrolls horizontally)
         Item {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
+            id: trackGridArea
+            x: 180
+            y: 0
+            width: Math.max(parent.width - 180, 0)
+            height: parent.height
             clip: true
 
             // Grid guides rendering inside track
@@ -272,4 +326,3 @@ Rectangle {
             }
         }
     }
-}

@@ -24,6 +24,101 @@ ApplicationWindow {
     property color colorTextSecondary: "#8A8A9E"
     property color colorGlassGlow: "#1F1A30"
 
+    // Global Lyric Sweep Progress calculator for syllable sweeps
+    function calculateClipSweepProgress(clipData, currentPlayheadTimeUs) {
+        if (!clipData || clipData.clipType !== 2 || clipData.syllables.length === 0) {
+            return 0.0;
+        }
+        
+        var relativePlayheadUs = currentPlayheadTimeUs - clipData.startTime;
+        
+        if (relativePlayheadUs <= 0) return 0.0;
+        if (relativePlayheadUs >= clipData.duration) return 1.0;
+        
+        var totalSyllables = clipData.syllables.length;
+        var fullText = clipData.lyricText;
+        var totalChars = fullText.length;
+        if (totalChars === 0) return 0.0;
+        
+        var charOffsets = [];
+        var charCount = 0;
+        for (var i = 0; i < totalSyllables; ++i) {
+            charOffsets.push(charCount);
+            charCount += clipData.syllables[i].text.length;
+        }
+        
+        for (var i = 0; i < totalSyllables; ++i) {
+            var syl = clipData.syllables[i];
+            var sStart = syl.relativeStart;
+            var sDuration = syl.duration;
+            var sEnd = sStart + sDuration;
+            
+            var sylCharOffset = charOffsets[i];
+            var sylCharLen = syl.text.length;
+            
+            if (relativePlayheadUs >= sStart && relativePlayheadUs <= sEnd) {
+                var sylProgress = (relativePlayheadUs - sStart) / sDuration;
+                var activeChars = sylCharOffset + (sylCharLen * sylProgress);
+                return activeChars / totalChars;
+            } else if (relativePlayheadUs < sStart) {
+                return sylCharOffset / totalChars;
+            }
+        }
+        return 1.0;
+    }
+
+    // Keyboard Shortcuts
+    Shortcut {
+        sequence: "Space"
+        onActivated: {
+            if (audioEngine.isPlaying) {
+                audioEngine.pause();
+            } else {
+                audioEngine.play();
+            }
+        }
+    }
+    Shortcut {
+        sequence: "Home"
+        onActivated: timelineManager.currentPlayheadTime = 0
+    }
+    Shortcut {
+        sequence: "End"
+        onActivated: timelineManager.currentPlayheadTime = timelineManager.totalDuration
+    }
+    Shortcut {
+        sequence: "Ctrl+S"
+        onActivated: {
+            var filePath = "D:/Document/NC-Project/NC-KTV/NC-KTV_V2/project.nctv";
+            timelineManager.saveProject(filePath);
+            saveStatusText.text = "Project Saved!";
+            saveTextAnim.start();
+        }
+    }
+    Shortcut {
+        sequence: "Ctrl+O"
+        onActivated: {
+            var filePath = "D:/Document/NC-Project/NC-KTV/NC-KTV_V2/project.nctv";
+            if (timelineManager.loadProject(filePath)) {
+                saveStatusText.text = "Project Loaded!";
+            } else {
+                saveStatusText.text = "Load Failed (no saved project)";
+            }
+            saveTextAnim.start();
+        }
+    }
+    Shortcut {
+        sequence: "Delete"
+        onActivated: {
+            if (propertiesPanel.selectedClip && propertiesPanel.selectedTrack) {
+                var deleted = propertiesPanel.selectedTrack.removeClip(propertiesPanel.selectedClip.clipId);
+                if (deleted) {
+                    propertiesPanel.selectedClip = null;
+                }
+            }
+        }
+    }
+
     background: Rectangle {
         color: rootWindow.colorBgPitch
         
@@ -99,17 +194,37 @@ ApplicationWindow {
                     Layout.alignment: Qt.AlignCenter
                     spacing: 12
 
-                    // Stop
+                    // Skip to Start (⏮)
+                    Button {
+                        id: btnPrev
+                        flat: true
+                        implicitWidth: 32
+                        implicitHeight: 32
+                        onClicked: timelineManager.currentPlayheadTime = 0
+                        contentItem: Text {
+                            text: "⏮"
+                            color: btnPrev.hovered ? rootWindow.colorAccentViolet : rootWindow.colorTextPrimary
+                            font.pixelSize: 16
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            color: btnPrev.hovered ? "#222" : "transparent"
+                            radius: 4
+                        }
+                    }
+
+                    // Stop (■)
                     Button {
                         id: btnStop
                         flat: true
-                        implicitWidth: 36
-                        implicitHeight: 36
+                        implicitWidth: 32
+                        implicitHeight: 32
                         onClicked: audioEngine.stop()
                         contentItem: Text {
                             text: "■"
                             color: btnStop.hovered ? rootWindow.colorAccentViolet : rootWindow.colorTextPrimary
-                            font.pixelSize: 18
+                            font.pixelSize: 16
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
                         }
@@ -119,12 +234,12 @@ ApplicationWindow {
                         }
                     }
 
-                    // Play/Pause
+                    // Play/Pause (▶ / ‖)
                     Button {
                         id: btnPlay
                         flat: true
-                        implicitWidth: 44
-                        implicitHeight: 44
+                        implicitWidth: 40
+                        implicitHeight: 40
                         onClicked: {
                             if (audioEngine.isPlaying) {
                                 audioEngine.pause();
@@ -135,7 +250,7 @@ ApplicationWindow {
                         contentItem: Text {
                             text: audioEngine.isPlaying ? "‖" : "▶"
                             color: rootWindow.colorAccentGreen
-                            font.pixelSize: 20
+                            font.pixelSize: 18
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
                         }
@@ -143,7 +258,27 @@ ApplicationWindow {
                             color: btnPlay.hovered ? "#1F352E" : "#14241F"
                             border.color: rootWindow.colorAccentGreen
                             border.width: btnPlay.hovered ? 1.5 : 1
-                            radius: 22
+                            radius: 20
+                        }
+                    }
+
+                    // Skip to End (⏭)
+                    Button {
+                        id: btnNext
+                        flat: true
+                        implicitWidth: 32
+                        implicitHeight: 32
+                        onClicked: timelineManager.currentPlayheadTime = timelineManager.totalDuration
+                        contentItem: Text {
+                            text: "⏭"
+                            color: btnNext.hovered ? rootWindow.colorAccentViolet : rootWindow.colorTextPrimary
+                            font.pixelSize: 16
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            color: btnNext.hovered ? "#222" : "transparent"
+                            radius: 4
                         }
                     }
 
@@ -152,17 +287,58 @@ ApplicationWindow {
                         color: "#050507"
                         border.color: rootWindow.colorBorder
                         radius: 6
-                        width: 150
-                        height: 36
+                        width: 130
+                        height: 32
 
                         Label {
                             anchors.centerIn: parent
                             text: timelineManager.formatTimecode(timelineManager.currentPlayheadTime)
                             color: rootWindow.colorAccentGreen
-                            font.pixelSize: 16
+                            font.pixelSize: 14
                             font.family: "Courier New"
                             font.bold: true
                             font.letterSpacing: 1.5
+                        }
+                    }
+
+                    // Master Volume Controller Slider
+                    RowLayout {
+                        spacing: 4
+                        Layout.leftMargin: 10
+                        
+                        Label {
+                            text: "🔊"
+                            font.pixelSize: 12
+                            color: rootWindow.colorTextSecondary
+                        }
+                        
+                        Slider {
+                            id: masterVolSlider
+                            implicitWidth: 100
+                            from: 0.0
+                            to: 1.0
+                            value: audioEngine.masterVolume
+                            onMoved: audioEngine.masterVolume = value
+                            
+                            background: Rectangle {
+                                implicitHeight: 4
+                                color: "#222"
+                                radius: 2
+                                Rectangle {
+                                    width: masterVolSlider.visualPosition * parent.width
+                                    height: parent.height
+                                    color: rootWindow.colorAccentViolet
+                                    radius: 2
+                                }
+                            }
+                            handle: Rectangle {
+                                x: masterVolSlider.visualPosition * (masterVolSlider.width - width)
+                                y: (masterVolSlider.height - height) / 2
+                                width: 10
+                                height: 10
+                                radius: 5
+                                color: masterVolSlider.hovered ? "#FFF" : rootWindow.colorAccentViolet
+                            }
                         }
                     }
                 }
@@ -174,12 +350,35 @@ ApplicationWindow {
                     spacing: 12
 
                     Button {
+                        id: btnHelp
+                        text: "?"
+                        implicitWidth: 28
+                        implicitHeight: 28
+                        onClicked: shortcutsPopup.open()
+                        contentItem: Text {
+                            text: btnHelp.text
+                            color: rootWindow.colorTextSecondary
+                            font.bold: true
+                            font.pixelSize: 12
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            color: btnHelp.hovered ? "#2C2C35" : "#1B1B22"
+                            radius: 14
+                            border.color: btnHelp.hovered ? rootWindow.colorTextSecondary : rootWindow.colorBorder
+                            border.width: 1
+                        }
+                    }
+
+                    Button {
                         id: btnSave
                         text: "Save Project"
                         onClicked: {
                             // Saving nctv project format
                             var filePath = "D:/Document/NC-Project/NC-KTV/NC-KTV_V2/project.nctv";
                             timelineManager.saveProject(filePath);
+                            saveStatusText.text = "Project Saved!";
                             saveTextAnim.start();
                         }
                         contentItem: Text {
@@ -193,6 +392,33 @@ ApplicationWindow {
                             color: btnSave.hovered ? rootWindow.colorAccentViolet : "#2D264A"
                             radius: 4
                             border.color: rootWindow.colorAccentViolet
+                            border.width: 1
+                        }
+                    }
+
+                    Button {
+                        id: btnLoad
+                        text: "Load Project"
+                        onClicked: {
+                            var filePath = "D:/Document/NC-Project/NC-KTV/NC-KTV_V2/project.nctv";
+                            if (timelineManager.loadProject(filePath)) {
+                                saveStatusText.text = "Project Loaded!";
+                            } else {
+                                saveStatusText.text = "Load Failed (no saved project)";
+                            }
+                            saveTextAnim.start();
+                        }
+                        contentItem: Text {
+                            text: btnLoad.text
+                            color: rootWindow.colorTextPrimary
+                            font.bold: true
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            color: btnLoad.hovered ? rootWindow.colorAccentViolet : "#1B1B22"
+                            radius: 4
+                            border.color: rootWindow.colorBorder
                             border.width: 1
                         }
                     }
@@ -254,49 +480,200 @@ ApplicationWindow {
 
                 // Center main timeline container / Preview Card
                 Rectangle {
+                    id: previewContainer
                     color: rootWindow.colorBgPitch
                     border.color: rootWindow.colorBorder
                     border.width: 1
                     SplitView.fillWidth: true
 
+                    // Animated Live Audio Visualizer
+                    Timer {
+                        id: visualizerTimer
+                        interval: 33 // ~30 fps
+                        running: audioEngine.isPlaying
+                        repeat: true
+                        onTriggered: visualizerCanvas.requestPaint()
+                    }
+
+                    Canvas {
+                        id: visualizerCanvas
+                        anchors.fill: parent
+                        opacity: audioEngine.isPlaying ? 0.35 : 0.08
+                        Behavior on opacity { NumberAnimation { duration: 500 } }
+                        
+                        property double timeVar: 0.0
+                        
+                        onPaint: {
+                            var ctx = getContext("2d");
+                            ctx.clearRect(0, 0, width, height);
+                            
+                            if (audioEngine.isPlaying) {
+                                timeVar += 0.15;
+                            } else {
+                                // Draw a beautiful grid design when stopped
+                                ctx.strokeStyle = "#1A1A26";
+                                ctx.lineWidth = 1;
+                                var size = 20;
+                                for(var x = 0; x < width; x += size) {
+                                    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke();
+                                }
+                                for(var y = 0; y < height; y += size) {
+                                    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke();
+                                }
+                                return;
+                            }
+                            
+                            // Neon wave drawing
+                            var gradient = ctx.createLinearGradient(0, 0, width, 0);
+                            gradient.addColorStop(0.0, rootWindow.colorAccentViolet);
+                            gradient.addColorStop(0.5, "#00E5FF");
+                            gradient.addColorStop(1.0, rootWindow.colorAccentGreen);
+                            
+                            ctx.strokeStyle = gradient;
+                            ctx.lineWidth = 3;
+                            ctx.lineCap = "round";
+                            ctx.beginPath();
+                            
+                            var centerY = height / 2;
+                            for (var i = 0; i < width; i += 5) {
+                                var angle = (i / width) * Math.PI * 4 + timeVar;
+                                var waveVal = Math.sin(angle) * Math.cos(angle * 0.5) * 45;
+                                waveVal += (Math.random() - 0.5) * 4;
+                                
+                                if (i === 0) {
+                                    ctx.moveTo(i, centerY + waveVal);
+                                } else {
+                                    ctx.lineTo(i, centerY + waveVal);
+                                }
+                            }
+                            ctx.stroke();
+                        }
+                    }
+
+                    // Watermark / Guide Text
                     Label {
-                        anchors.centerIn: parent
-                        text: "Visual Preview / Live Lyrics Overlay"
-                        font.pixelSize: 18
-                        color: rootWindow.colorTextSecondary
-                        font.family: "Inter"
+                        anchors.top: parent.top
+                        anchors.topMargin: 15
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: "LIVE MASTER MONITOR"
+                        font.pixelSize: 10
+                        font.bold: true
+                        font.letterSpacing: 2
+                        color: rootWindow.colorAccentViolet
+                        opacity: 0.5
                     }
 
                     // Simulated live scrolling subtitle overlay
-                    Label {
+                    Column {
                         anchors.bottom: parent.bottom
-                        anchors.bottomMargin: 40
+                        anchors.bottomMargin: 25
                         anchors.horizontalCenter: parent.horizontalCenter
-                        text: {
-                            // Find active lyrics clip under the current playhead
-                            var activeText = "";
-                            var time = timelineManager.currentPlayheadTime;
+                        width: parent.width - 40
+                        spacing: 8
+
+                        // Row 1: Active lyrics line
+                        Item {
+                            id: activeLineWrapper
+                            width: parent.width
+                            height: 36
                             
-                            // Check tracks for active text
-                            for(var i = 0; i < timelineManager.trackListModel.rowCount(); ++i) {
-                                var track = timelineManager.trackListModel.tracks()[i];
-                                if (track && track.trackType === 2) { // Lyrics Type
-                                    for(var c = 0; c < track.clips().length; ++c) {
-                                        var clip = track.clips()[c];
-                                        if (time >= clip.startTime && time <= clip.endTime) {
-                                            activeText = clip.lyricText;
-                                            break;
+                            property var activeClip: {
+                                var time = timelineManager.currentPlayheadTime;
+                                for (var i = 0; i < timelineManager.trackListModel.rowCount(); ++i) {
+                                    var track = timelineManager.trackListModel.tracks()[i];
+                                    if (track && track.trackType === 2) { // Lyrics Track
+                                        var clips = track.clips();
+                                        for (var c = 0; c < clips.length; ++c) {
+                                            var clip = clips[c];
+                                            if (time >= clip.startTime && time <= clip.endTime) {
+                                                return clip;
+                                            }
                                         }
                                     }
                                 }
+                                return null;
                             }
-                            return activeText !== "" ? activeText : "(Waiting for lyric cues)";
+
+                            property var nextClip: {
+                                var time = timelineManager.currentPlayheadTime;
+                                var bestClip = null;
+                                for (var i = 0; i < timelineManager.trackListModel.rowCount(); ++i) {
+                                    var track = timelineManager.trackListModel.tracks()[i];
+                                    if (track && track.trackType === 2) { // Lyrics Track
+                                        var clips = track.clips();
+                                        for (var c = 0; c < clips.length; ++c) {
+                                            var clip = clips[c];
+                                            if (clip.startTime > time) {
+                                                if (!bestClip || clip.startTime < bestClip.startTime) {
+                                                    bestClip = clip;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                return bestClip;
+                            }
+
+                            property double sweepProgress: {
+                                if (!activeClip) return 0.0;
+                                return rootWindow.calculateClipSweepProgress(activeClip, timelineManager.currentPlayheadTime);
+                            }
+
+                            // Base Inactive Text (Slate color)
+                            Label {
+                                id: baseTextLabel
+                                text: activeLineWrapper.activeClip ? activeLineWrapper.activeClip.lyricText : (activeLineWrapper.nextClip ? "" : "(Waiting for lyric cues)")
+                                font.pixelSize: 22
+                                font.bold: true
+                                color: "#4A4A5A"
+                                style: Text.Outline
+                                styleColor: "#08080A"
+                                font.family: "Outfit"
+                                anchors.centerIn: parent
+                                horizontalAlignment: Text.AlignHCenter
+                            }
+
+                            // Overlay glowing sweep text
+                            Item {
+                                anchors.left: baseTextLabel.left
+                                anchors.top: baseTextLabel.top
+                                height: baseTextLabel.height
+                                width: activeLineWrapper.sweepProgress * baseTextLabel.width
+                                clip: true
+
+                                Label {
+                                    text: baseTextLabel.text
+                                    font.pixelSize: 22
+                                    font.bold: true
+                                    color: rootWindow.colorAccentGreen
+                                    style: Text.Outline
+                                    styleColor: "#08080A"
+                                    font.family: "Outfit"
+                                    width: baseTextLabel.width
+                                    anchors.left: parent.left
+                                    anchors.top: parent.top
+                                }
+                            }
                         }
-                        font.pixelSize: 26
-                        font.bold: true
-                        color: rootWindow.colorAccentGreen
-                        style: Text.Outline
-                        styleColor: "#000"
+
+                        // Row 2: Upcoming lookahead lyrics line (faint/smaller)
+                        Label {
+                            text: {
+                                var nc = activeLineWrapper.nextClip;
+                                return nc ? nc.lyricText : "";
+                            }
+                            font.pixelSize: 15
+                            font.bold: true
+                            color: "#8A8A9E"
+                            opacity: activeLineWrapper.nextClip ? 0.4 : 0.0
+                            style: Text.Outline
+                            styleColor: "#08080A"
+                            font.family: "Outfit"
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            horizontalAlignment: Text.AlignHCenter
+                            
+                            Behavior on opacity { NumberAnimation { duration: 250 } }
+                        }
                     }
                 }
 
@@ -584,5 +961,101 @@ ApplicationWindow {
             }
         }
     }
+
+    Popup {
+        id: shortcutsPopup
+        modal: true
+        focus: true
+        anchors.centerIn: Overlay.overlay
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+        width: 380
+        height: 280
+
+        background: Rectangle {
+            color: "#111115"
+            border.color: "#2A2A35"
+            border.width: 2
+            radius: 12
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: 1
+                color: "transparent"
+                border.color: "#3A3A4A"
+                border.width: 1
+                radius: 11
+            }
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 20
+            spacing: 12
+
+            RowLayout {
+                spacing: 10
+                Rectangle {
+                    width: 8
+                    height: 20
+                    color: rootWindow.colorAccentViolet
+                    radius: 2
+                }
+                Label {
+                    text: "Keyboard Shortcuts Guide"
+                    font.pixelSize: 15
+                    font.bold: true
+                    font.family: "Outfit"
+                    color: "#F0F0F5"
+                }
+            }
+
+            GridLayout {
+                columns: 2
+                rowSpacing: 8
+                columnSpacing: 15
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+
+                Label { text: "Spacebar"; font.bold: true; color: rootWindow.colorAccentGreen }
+                Label { text: "Play / Pause Audio"; color: rootWindow.colorTextPrimary }
+
+                Label { text: "Ctrl + S"; font.bold: true; color: rootWindow.colorAccentGreen }
+                Label { text: "Save Active Project"; color: rootWindow.colorTextPrimary }
+
+                Label { text: "Home / End"; font.bold: true; color: rootWindow.colorAccentGreen }
+                Label { text: "Go to Project Start / End"; color: rootWindow.colorTextPrimary }
+
+                Label { text: "Delete"; font.bold: true; color: rootWindow.colorAccentGreen }
+                Label { text: "Delete Selected Timeline Clip"; color: rootWindow.colorTextPrimary }
+
+                Label { text: "Drag Clip"; font.bold: true; color: rootWindow.colorAccentGreen }
+                Label { text: "Move clip (Snaps to bounds)"; color: rootWindow.colorTextPrimary }
+
+                Label { text: "Clip Ends"; font.bold: true; color: rootWindow.colorAccentGreen }
+                Label { text: "Resize left/right clip boundary"; color: rootWindow.colorTextPrimary }
+            }
+
+            Button {
+                id: btnCloseShortcuts
+                Layout.fillWidth: true
+                implicitHeight: 30
+                text: "Got It"
+                onClicked: shortcutsPopup.close()
+                contentItem: Text {
+                    text: btnCloseShortcuts.text
+                    color: "#F0F0F5"
+                    font.bold: true
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    font.pixelSize: 11
+                }
+                background: Rectangle {
+                    color: btnCloseShortcuts.hovered ? "#8E5CFF" : rootWindow.colorAccentViolet
+                    radius: 6
+                }
+            }
+        }
+    }
 }
+
 

@@ -46,28 +46,28 @@ void StemSeparationWorker::run() {
 
         // Process stereo interleaved samples (L, R, L, R...)
         // Mid-Side extraction: Mid = (L + R) / 2, Side = (L - R) / 2
-        for (size_t i = 0; i < totalSamples; i += 2) {
-            // Update progress in steps
-            if (i % 200000 == 0) {
-                emit progressUpdated(static_cast<double>(i) / totalSamples);
-                msleep(5); // yield slightly for smooth visual UI progress updates
+        size_t numStereoSamples = totalSamples / 2;
+        size_t progressStep = std::max<size_t>(100000, numStereoSamples / 100); // 1% updates
+
+        for (size_t idx = 0; idx < numStereoSamples; ++idx) {
+            if (idx % progressStep == 0) {
+                emit progressUpdated(static_cast<double>(idx) / numStereoSamples);
             }
 
-            if (i + 1 < totalSamples) {
-                float L = m_inputSamples[i];
-                float R = m_inputSamples[i + 1];
+            size_t i = idx * 2;
+            float L = m_inputSamples[i];
+            float R = m_inputSamples[i + 1];
 
-                // Mid channel contains center signals (vocals usually mix centered)
-                float mid = (L + R) * 0.5f;
-                vocals[i] = mid;
-                vocals[i + 1] = mid;
+            // Mid channel contains center signals (vocals usually mix centered)
+            float mid = (L + R) * 0.5f;
+            vocals[i] = mid;
+            vocals[i + 1] = mid;
 
-                // Side channel cancels center signals (leaves stereo backing track / instruments)
-                float sideL = (L - R) * 0.5f;
-                float sideR = (R - L) * 0.5f;
-                instrumental[i] = sideL;
-                instrumental[i + 1] = sideR;
-            }
+            // Side channel cancels center signals (leaves stereo backing track / instruments)
+            float sideL = (L - R) * 0.5f;
+            float sideR = (R - L) * 0.5f;
+            instrumental[i] = sideL;
+            instrumental[i + 1] = sideR;
         }
 
         emit progressUpdated(0.95);

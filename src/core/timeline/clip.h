@@ -66,6 +66,9 @@ public:
     // Parse syllable-level timings in LRC format: "Word1 <00:01.50> Word2 <00:02.00>"
     Q_INVOKABLE void parseLrcSyllables(const QString& rawLrc);
     
+    // Update a single syllable's relative start time and duration
+    Q_INVOKABLE void updateSyllable(int index, qint64 relativeStart, qint64 duration);
+    
     // Generates word timings evenly spread across the clip's duration
     void autoGenerateSyllables();
 

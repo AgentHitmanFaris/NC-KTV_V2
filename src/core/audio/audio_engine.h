@@ -13,6 +13,7 @@ namespace ncktv {
 class AudioEngine : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool isPlaying READ isPlaying WRITE setIsPlaying NOTIFY isPlayingChanged)
+    Q_PROPERTY(float masterVolume READ masterVolume WRITE setMasterVolume NOTIFY masterVolumeChanged)
 
 public:
     explicit AudioEngine(TimelineManager* timelineManager, QObject* parent = nullptr);
@@ -23,6 +24,9 @@ public:
 
     [[nodiscard]] bool isPlaying() const { return m_isPlaying; }
     void setIsPlaying(bool playing);
+
+    [[nodiscard]] float masterVolume() const { return m_masterVolume; }
+    void setMasterVolume(float vol);
 
     Q_INVOKABLE void play();
     Q_INVOKABLE void pause();
@@ -49,6 +53,7 @@ public:
 
 signals:
     void isPlayingChanged();
+    void masterVolumeChanged();
 
 private slots:
     void updatePlayheadFromAudio();
@@ -73,6 +78,8 @@ private:
 
     // Tracks volume state map for smoothing
     QMap<QString, float> m_prevVolumes;
+
+    float m_masterVolume = 1.0f;
 };
 
 } // namespace ncktv

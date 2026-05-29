@@ -195,36 +195,38 @@ bool StemSeparator::separate(const std::vector<float>& input48kStereo,
         return false;
     }
 
-    // Create 4-channel complex spectrogram: [4][num_bins][num_frames]
+    // Create 4-channel complex spectrogram: flat layout of size [4 * num_bins * num_frames]
     // Channel mapping: 0 = L_re, 1 = L_im, 2 = R_re, 3 = R_im
-    auto spectrogram = std::vector<std::vector<std::vector<float>>>(4, std::vector<std::vector<float>>(num_bins, std::vector<float>(num_frames, 0.0f)));
+    std::vector<float> spectrogram(4 * num_bins * num_frames, 0.0f);
+
+    // Pre-allocate STFT loop temporary buffers to avoid 40,000+ heap allocations
+    std::vector<float> windowed_left(n_fft);
+    std::vector<AVComplexFloat> output_left(n_fft / 2 + 1);
+    std::vector<float> windowed_right(n_fft);
+    std::vector<AVComplexFloat> output_right(n_fft / 2 + 1);
 
     // Execute forward STFT on Left and Right channels
     for (size_t f = 0; f < num_frames; ++f) {
         size_t start_idx = f * hop_size;
 
         // 1. Process Left Channel
-        std::vector<float> windowed_left(n_fft);
         for (int i = 0; i < n_fft; ++i) {
             windowed_left[i] = input_left[start_idx + i] * hann[i];
         }
-        std::vector<AVComplexFloat> output_left(n_fft / 2 + 1);
         stft_fn(stft_ctx, output_left.data(), windowed_left.data(), sizeof(float));
 
         // 2. Process Right Channel
-        std::vector<float> windowed_right(n_fft);
         for (int i = 0; i < n_fft; ++i) {
             windowed_right[i] = input_right[start_idx + i] * hann[i];
         }
-        std::vector<AVComplexFloat> output_right(n_fft / 2 + 1);
         stft_fn(stft_ctx, output_right.data(), windowed_right.data(), sizeof(float));
 
-        // Store first num_bins bins into complex spectrogram
+        // Store first num_bins bins into flat complex spectrogram
         for (int b = 0; b < num_bins; ++b) {
-            spectrogram[0][b][f] = output_left[b].re;
-            spectrogram[1][b][f] = output_left[b].im;
-            spectrogram[2][b][f] = output_right[b].re;
-            spectrogram[3][b][f] = output_right[b].im;
+            spectrogram[(0 * num_bins + b) * num_frames + f] = output_left[b].re;
+            spectrogram[(1 * num_bins + b) * num_frames + f] = output_left[b].im;
+            spectrogram[(2 * num_bins + b) * num_frames + f] = output_right[b].re;
+            spectrogram[(3 * num_bins + b) * num_frames + f] = output_right[b].im;
         }
     }
 
@@ -240,7 +242,7 @@ bool StemSeparator::separate(const std::vector<float>& input48kStereo,
 
     Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
 
-    auto vocals_spectrogram = std::vector<std::vector<std::vector<float>>>(4, std::vector<std::vector<float>>(num_bins, std::vector<float>(num_frames, 0.0f)));
+    std::vector<float> vocals_spectrogram(4 * num_bins * num_frames, 0.0f);
     std::vector<float> vocals_weights(num_frames, 0.0f);
 
     const size_t O_frame = 32; // Overlap size on frame level
@@ -250,14 +252,13 @@ bool StemSeparator::separate(const std::vector<float>& input48kStereo,
         size_t chunk_len_frame = std::min<size_t>(W_frame, num_frames - offset_frame);
         if (chunk_len_frame == 0) break;
 
-        // Build rank-4 tensor of shape [1, 4, num_bins, W_frame]
+        // Build rank-4 tensor of shape [1, 4, num_bins, W_frame] with optimized memcpy copies
         std::vector<float> planarInput(1 * 4 * num_bins * W_frame, 0.0f);
         for (int c = 0; c < 4; ++c) {
             for (int b = 0; b < num_bins; ++b) {
-                for (size_t t = 0; t < chunk_len_frame; ++t) {
-                    size_t idx = c * (num_bins * W_frame) + b * W_frame + t;
-                    planarInput[idx] = spectrogram[c][b][offset_frame + t];
-                }
+                size_t src_start = (c * num_bins + b) * num_frames + offset_frame;
+                size_t dest_start = (c * num_bins + b) * W_frame;
+                std::memcpy(&planarInput[dest_start], &spectrogram[src_start], chunk_len_frame * sizeof(float));
             }
         }
 
@@ -289,7 +290,8 @@ bool StemSeparator::separate(const std::vector<float>& input48kStereo,
                         for (int c = 0; c < 4; ++c) {
                             for (int b = 0; b < num_bins; ++b) {
                                 size_t idx = c * (num_bins * W_frame) + b * W_frame + t;
-                                vocals_spectrogram[c][b][global_frame] += out_data[idx] * weight;
+                                size_t dest_idx = (c * num_bins + b) * num_frames + global_frame;
+                                vocals_spectrogram[dest_idx] += out_data[idx] * weight;
                             }
                         }
                     }
@@ -312,26 +314,23 @@ bool StemSeparator::separate(const std::vector<float>& input48kStereo,
         }
     }
 
-    // Normalize vocals spectrogram by overlap weights
-    for (size_t f = 0; f < num_frames; ++f) {
-        float w = vocals_weights[f];
-        if (w > 1e-5f) {
-            for (int c = 0; c < 4; ++c) {
-                for (int b = 0; b < num_bins; ++b) {
-                    vocals_spectrogram[c][b][f] /= w;
+    // Normalize vocals spectrogram by overlap weights (with cache-friendly loop order)
+    for (int c = 0; c < 4; ++c) {
+        for (int b = 0; b < num_bins; ++b) {
+            size_t base_idx = (c * num_bins + b) * num_frames;
+            for (size_t f = 0; f < num_frames; ++f) {
+                float w = vocals_weights[f];
+                if (w > 1e-5f) {
+                    vocals_spectrogram[base_idx + f] /= w;
                 }
             }
         }
     }
 
-    // Compute instrumental complex spectrogram: instrumental = input - vocals
-    auto instrumental_spectrogram = std::vector<std::vector<std::vector<float>>>(4, std::vector<std::vector<float>>(num_bins, std::vector<float>(num_frames, 0.0f)));
-    for (int c = 0; c < 4; ++c) {
-        for (int b = 0; b < num_bins; ++b) {
-            for (size_t f = 0; f < num_frames; ++f) {
-                instrumental_spectrogram[c][b][f] = spectrogram[c][b][f] - vocals_spectrogram[c][b][f];
-            }
-        }
+    // Compute instrumental complex spectrogram: instrumental = input - vocals (contiguous flat structure allows compiler vectorization)
+    std::vector<float> instrumental_spectrogram(4 * num_bins * num_frames);
+    for (size_t i = 0; i < spectrogram.size(); ++i) {
+        instrumental_spectrogram[i] = spectrogram[i] - vocals_spectrogram[i];
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -357,6 +356,12 @@ bool StemSeparator::separate(const std::vector<float>& input48kStereo,
         }
     }
 
+    // Pre-allocate synthesis loop temporary buffers to avoid another 80,000+ heap allocations
+    std::vector<AVComplexFloat> v_left_complex(n_fft / 2 + 1);
+    std::vector<float> v_left_frame(n_fft);
+    std::vector<AVComplexFloat> v_right_complex(n_fft / 2 + 1);
+    std::vector<float> v_right_frame(n_fft);
+
     // 1. Reconstruct Vocals Waveform
     std::vector<float> vocals_left_padded(padded_length, 0.0f);
     std::vector<float> vocals_right_padded(padded_length, 0.0f);
@@ -364,25 +369,21 @@ bool StemSeparator::separate(const std::vector<float>& input48kStereo,
         size_t start_idx = f * hop_size;
 
         // Reconstruct Left Vocals Frame
-        std::vector<AVComplexFloat> v_left_complex(n_fft / 2 + 1);
         for (int b = 0; b < num_bins; ++b) {
-            v_left_complex[b].re = vocals_spectrogram[0][b][f];
-            v_left_complex[b].im = vocals_spectrogram[1][b][f];
+            v_left_complex[b].re = vocals_spectrogram[(0 * num_bins + b) * num_frames + f];
+            v_left_complex[b].im = vocals_spectrogram[(1 * num_bins + b) * num_frames + f];
         }
         v_left_complex[num_bins].re = 0.0f;
         v_left_complex[num_bins].im = 0.0f;
-        std::vector<float> v_left_frame(n_fft);
         istft_fn(istft_ctx, v_left_frame.data(), v_left_complex.data(), sizeof(AVComplexFloat));
 
         // Reconstruct Right Vocals Frame
-        std::vector<AVComplexFloat> v_right_complex(n_fft / 2 + 1);
         for (int b = 0; b < num_bins; ++b) {
-            v_right_complex[b].re = vocals_spectrogram[2][b][f];
-            v_right_complex[b].im = vocals_spectrogram[3][b][f];
+            v_right_complex[b].re = vocals_spectrogram[(2 * num_bins + b) * num_frames + f];
+            v_right_complex[b].im = vocals_spectrogram[(3 * num_bins + b) * num_frames + f];
         }
         v_right_complex[num_bins].re = 0.0f;
         v_right_complex[num_bins].im = 0.0f;
-        std::vector<float> v_right_frame(n_fft);
         istft_fn(istft_ctx, v_right_frame.data(), v_right_complex.data(), sizeof(AVComplexFloat));
 
         // Accumulate overlap-add
@@ -392,6 +393,12 @@ bool StemSeparator::separate(const std::vector<float>& input48kStereo,
         }
     }
 
+    // Reuse pre-allocated complex buffers for instrumental reconstruction to avoid reallocation
+    std::vector<AVComplexFloat> i_left_complex(n_fft / 2 + 1);
+    std::vector<float> i_left_frame(n_fft);
+    std::vector<AVComplexFloat> i_right_complex(n_fft / 2 + 1);
+    std::vector<float> i_right_frame(n_fft);
+
     // 2. Reconstruct Instrumental Waveform
     std::vector<float> inst_left_padded(padded_length, 0.0f);
     std::vector<float> inst_right_padded(padded_length, 0.0f);
@@ -399,25 +406,21 @@ bool StemSeparator::separate(const std::vector<float>& input48kStereo,
         size_t start_idx = f * hop_size;
 
         // Reconstruct Left Instrumental Frame
-        std::vector<AVComplexFloat> i_left_complex(n_fft / 2 + 1);
         for (int b = 0; b < num_bins; ++b) {
-            i_left_complex[b].re = instrumental_spectrogram[0][b][f];
-            i_left_complex[b].im = instrumental_spectrogram[1][b][f];
+            i_left_complex[b].re = instrumental_spectrogram[(0 * num_bins + b) * num_frames + f];
+            i_left_complex[b].im = instrumental_spectrogram[(1 * num_bins + b) * num_frames + f];
         }
         i_left_complex[num_bins].re = 0.0f;
         i_left_complex[num_bins].im = 0.0f;
-        std::vector<float> i_left_frame(n_fft);
         istft_fn(istft_ctx, i_left_frame.data(), i_left_complex.data(), sizeof(AVComplexFloat));
 
         // Reconstruct Right Instrumental Frame
-        std::vector<AVComplexFloat> i_right_complex(n_fft / 2 + 1);
         for (int b = 0; b < num_bins; ++b) {
-            i_right_complex[b].re = instrumental_spectrogram[2][b][f];
-            i_right_complex[b].im = instrumental_spectrogram[3][b][f];
+            i_right_complex[b].re = instrumental_spectrogram[(2 * num_bins + b) * num_frames + f];
+            i_right_complex[b].im = instrumental_spectrogram[(3 * num_bins + b) * num_frames + f];
         }
         i_right_complex[num_bins].re = 0.0f;
         i_right_complex[num_bins].im = 0.0f;
-        std::vector<float> i_right_frame(n_fft);
         istft_fn(istft_ctx, i_right_frame.data(), i_right_complex.data(), sizeof(AVComplexFloat));
 
         // Accumulate overlap-add

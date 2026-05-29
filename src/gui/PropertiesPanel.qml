@@ -186,6 +186,134 @@ Rectangle {
                     }
                 }
 
+                // Syllable Timing Inspector (only visible for lyrics type clips)
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    visible: selectedClip ? selectedClip.clipType === 2 : false
+                    spacing: 8
+
+                    Label {
+                        text: "SYLLABLE TIMING TUNER"
+                        font.bold: true
+                        font.pixelSize: 10
+                        color: rootWindow.colorTextSecondary
+                    }
+
+                    // Syllable List container
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: 180
+                        color: rootWindow.colorBgCard
+                        border.color: rootWindow.colorBorder
+                        radius: 4
+                        
+                        ListView {
+                            id: sylListView
+                            anchors.fill: parent
+                            anchors.margins: 6
+                            model: selectedClip ? selectedClip.syllables : []
+                            clip: true
+                            spacing: 4
+                            
+                            delegate: Rectangle {
+                                width: sylListView.width - 12
+                                height: 36
+                                color: "#16161D"
+                                border.color: rootWindow.colorBorder
+                                radius: 4
+                                
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 6
+                                    spacing: 8
+                                    
+                                    // Word Text
+                                    Label {
+                                        text: modelData.text.trim()
+                                        font.bold: true
+                                        font.pixelSize: 11
+                                        color: "#FFF"
+                                        Layout.preferredWidth: 80
+                                        elide: Text.ElideRight
+                                    }
+                                    
+                                    // Offset display
+                                    Label {
+                                        text: (modelData.relativeStart / 1000000.0).toFixed(2) + "s"
+                                        font.pixelSize: 9
+                                        color: rootWindow.colorAccentGreen
+                                        font.family: "Courier New"
+                                        Layout.preferredWidth: 40
+                                    }
+                                    
+                                    // Shift Start buttons
+                                    RowLayout {
+                                        spacing: 2
+                                        Button {
+                                            text: "Start -"
+                                            implicitWidth: 38
+                                            implicitHeight: 18
+                                            onClicked: {
+                                                var newStart = Math.max(0, modelData.relativeStart - 50000); // shift 50ms earlier
+                                                selectedClip.updateSyllable(index, newStart, modelData.duration);
+                                            }
+                                            background: Rectangle { color: "#222"; radius: 2 }
+                                            contentItem: Text { text: "-50ms"; font.pixelSize: 7; color: "#F0F0F5"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                        }
+                                        Button {
+                                            text: "Start +"
+                                            implicitWidth: 38
+                                            implicitHeight: 18
+                                            onClicked: {
+                                                var newStart = modelData.relativeStart + 50000; // shift 50ms later
+                                                selectedClip.updateSyllable(index, newStart, modelData.duration);
+                                            }
+                                            background: Rectangle { color: "#222"; radius: 2 }
+                                            contentItem: Text { text: "+50ms"; font.pixelSize: 7; color: "#F0F0F5"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                        }
+                                    }
+                                    
+                                    // Duration display
+                                    Label {
+                                        text: (modelData.duration / 1000000.0).toFixed(2) + "s"
+                                        font.pixelSize: 9
+                                        color: rootWindow.colorAccentGreen
+                                        font.family: "Courier New"
+                                        Layout.preferredWidth: 40
+                                    }
+
+                                    // Duration Adjust buttons
+                                    RowLayout {
+                                        spacing: 2
+                                        Button {
+                                            text: "Dur -"
+                                            implicitWidth: 38
+                                            implicitHeight: 18
+                                            onClicked: {
+                                                var newDur = Math.max(100000, modelData.duration - 50000); // decrease 50ms
+                                                selectedClip.updateSyllable(index, modelData.relativeStart, newDur);
+                                            }
+                                            background: Rectangle { color: "#222"; radius: 2 }
+                                            contentItem: Text { text: "-50ms"; font.pixelSize: 7; color: "#F0F0F5"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                        }
+                                        Button {
+                                            text: "Dur +"
+                                            implicitWidth: 38
+                                            implicitHeight: 18
+                                            onClicked: {
+                                                var newDur = modelData.duration + 50000; // increase 50ms
+                                                selectedClip.updateSyllable(index, modelData.relativeStart, newDur);
+                                            }
+                                            background: Rectangle { color: "#222"; radius: 2 }
+                                            contentItem: Text { text: "+50ms"; font.pixelSize: 7; color: "#F0F0F5"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Audio source file info
                 ColumnLayout {
                     Layout.fillWidth: true
