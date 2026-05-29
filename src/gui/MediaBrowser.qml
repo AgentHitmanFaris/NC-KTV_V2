@@ -42,12 +42,12 @@ Rectangle {
         function onMediaSeparationCompleted(vocalsPath, instPath) {
             var vocalsName = vocalsPath.substring(Math.max(vocalsPath.lastIndexOf('/'), vocalsPath.lastIndexOf('\\')) + 1);
             var instName = instPath.substring(Math.max(instPath.lastIndexOf('/'), instPath.lastIndexOf('\\')) + 1);
-            mediaBrowserRoot.addMediaFile(vocalsName, vocalsPath, "Audio");
-            mediaBrowserRoot.addMediaFile(instName, instPath, "Audio");
+            mediaBrowserRoot.addMediaFile(vocalsName, vocalsPath, "Audio", false);
+            mediaBrowserRoot.addMediaFile(instName, instPath, "Audio", false);
         }
     }
 
-    function addMediaFile(name, path, type) {
+    function addMediaFile(name, path, type, autoPut) {
         mockFilesModel.append({
             "name": name,
             "path": path,
@@ -55,6 +55,92 @@ Rectangle {
             "durationMs": 180000
         });
         selectedMediaIdx = mockFilesModel.count - 1;
+
+        if (autoPut) {
+            autoPutToTimeline(path, type);
+        }
+    }
+
+    function autoPutToTimeline(path, type) {
+        // Find currently selected track or first compatible track
+        var track = propertiesPanel.selectedTrack;
+        var i;
+        if (!track || track.trackType !== (type === "Video" ? 1 : (type === "Audio" ? 0 : 2))) {
+            track = null;
+            for (i = 0; i < timelineManager.trackListModel.rowCount(); ++i) {
+                var t = timelineManager.trackListModel.tracks()[i];
+                if (type === "Video" && t.trackType === 1) {
+                    track = t;
+                    break;
+                } else if (type === "Audio" && t.trackType === 0) {
+                    track = t;
+                    break;
+                } else if (type === "Lyrics" && t.trackType === 2) {
+                    track = t;
+                    break;
+                }
+            }
+        }
+
+        // Dynamic creation if compatible track does not exist
+        if (!track) {
+            if (type === "Video") {
+                var newVidTrackId = timelineManager.addTrack(1, "Video Track " + (timelineManager.trackListModel.rowCount() + 1));
+                for (i = 0; i < timelineManager.trackListModel.rowCount(); ++i) {
+                    var nt = timelineManager.trackListModel.tracks()[i];
+                    if (nt.trackId === newVidTrackId) {
+                        track = nt;
+                        break;
+                    }
+                }
+            } else if (type === "Audio") {
+                var newTrackId = timelineManager.addTrack(0, "Audio Track " + (timelineManager.trackListModel.rowCount() + 1));
+                for (i = 0; i < timelineManager.trackListModel.rowCount(); ++i) {
+                    var nt2 = timelineManager.trackListModel.tracks()[i];
+                    if (nt2.trackId === newTrackId) {
+                        track = nt2;
+                        break;
+                    }
+                }
+            } else if (type === "Lyrics") {
+                var newLyrTrackId = timelineManager.addTrack(2, "Lyrics Track " + (timelineManager.trackListModel.rowCount() + 1));
+                for (i = 0; i < timelineManager.trackListModel.rowCount(); ++i) {
+                    var nlt = timelineManager.trackListModel.tracks()[i];
+                    if (nlt.trackId === newLyrTrackId) {
+                        track = nlt;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (track) {
+            var clipCount = track.clips().length;
+            var clipId = "clip_" + (clipCount + 1);
+            var startUs = timelineManager.currentPlayheadTime;
+            var durUs = (track.trackType === 2) ? 4000000 : 0; // 0 lets C++ auto-detect length
+
+            var added = timelineManager.addClipToTrack(
+                track.trackId,
+                clipId,
+                track.trackType,
+                startUs,
+                durUs,
+                path,
+                track.trackType === 2 ? "New subtitle cue line" : ""
+            );
+
+            if (added) {
+                propertiesPanel.selectedTrack = track;
+                var clips = track.clips();
+                for (var c = 0; c < clips.length; ++c) {
+                    if (clips[c].clipId === clipId) {
+                        propertiesPanel.selectedClip = clips[c];
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     ColumnLayout {
@@ -277,7 +363,12 @@ Rectangle {
                                 // Smart fallback: find first compatible track automatically
                                 for (var i = 0; i < timelineManager.trackListModel.rowCount(); ++i) {
                                     var t = timelineManager.trackListModel.tracks()[i];
-                                    if (type === "Video" || type === "Audio") {
+                                    if (type === "Video") {
+                                        if (t.trackType === 1) { // Video track
+                                            track = t;
+                                            break;
+                                        }
+                                    } else if (type === "Audio") {
                                         if (t.trackType === 0) { // Audio track
                                             track = t;
                                             break;
@@ -292,7 +383,16 @@ Rectangle {
 
                                 // Dynamic creation: if still no compatible track exists, create one!
                                 if (!track) {
-                                    if (type === "Video" || type === "Audio") {
+                                    if (type === "Video") {
+                                        var newVidTrackId = timelineManager.addTrack(1, "Video Track " + (timelineManager.trackListModel.rowCount() + 1));
+                                        for (var j = 0; j < timelineManager.trackListModel.rowCount(); ++j) {
+                                            var nt = timelineManager.trackListModel.tracks()[j];
+                                            if (nt.trackId === newVidTrackId) {
+                                                track = nt;
+                                                break;
+                                            }
+                                        }
+                                    } else if (type === "Audio") {
                                         var newTrackId = timelineManager.addTrack(0, "Audio Track " + (timelineManager.trackListModel.rowCount() + 1));
                                         for (var j = 0; j < timelineManager.trackListModel.rowCount(); ++j) {
                                             var nt = timelineManager.trackListModel.tracks()[j];

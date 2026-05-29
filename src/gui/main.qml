@@ -745,7 +745,7 @@ ApplicationWindow {
             var extension = lastDotIdx !== -1 ? filename.substring(lastDotIdx + 1).toLowerCase() : "";
             var isVideo = (extension === "mp4" || extension === "mov");
             
-            mediaBrowser.addMediaFile(filename, path, isVideo ? "Video" : "Audio");
+            mediaBrowser.addMediaFile(filename, path, isVideo ? "Video" : "Audio", true);
         }
     }
 

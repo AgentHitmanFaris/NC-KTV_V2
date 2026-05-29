@@ -58,7 +58,7 @@ Rectangle {
                         width: 4
                         height: 12
                         radius: 2
-                        color: trackType === 0 ? rootWindow.colorAccentViolet : rootWindow.colorAccentGreen
+                        color: trackType === 0 ? rootWindow.colorAccentViolet : (trackType === 1 ? "#FFAB40" : rootWindow.colorAccentGreen)
                     }
                     Label {
                         text: trackName
@@ -72,9 +72,9 @@ Rectangle {
 
                 // Track Type Tag
                 Label {
-                    text: trackType === 0 ? "AUDIO TRACK" : "LYRIC CUES"
+                    text: trackType === 0 ? "AUDIO TRACK" : (trackType === 1 ? "VIDEO TRACK" : "LYRIC CUES")
                     font.pixelSize: 9
-                    color: trackType === 0 ? rootWindow.colorTextSecondary : rootWindow.colorAccentGreen
+                    color: trackType === 0 ? rootWindow.colorTextSecondary : (trackType === 1 ? "#FFAB40" : rootWindow.colorAccentGreen)
                 }
 
                 RowLayout {

@@ -98,6 +98,27 @@ Rectangle {
                 }
 
                 Button {
+                    id: btnAddVideo
+                    text: "+ VIDEO TRACK"
+                    implicitWidth: 100
+                    implicitHeight: 22
+                    onClicked: timelineManager.addTrack(1, "Video " + (timelineManager.trackListModel.rowCount() + 1))
+                    background: Rectangle {
+                        color: btnAddVideo.hovered ? rootWindow.colorAccentViolet : rootWindow.colorBgCard
+                        radius: 3
+                        border.color: rootWindow.colorBorder
+                    }
+                    contentItem: Text {
+                        text: btnAddVideo.text
+                        font.pixelSize: 9
+                        font.bold: true
+                        color: rootWindow.colorTextPrimary
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+
+                Button {
                     id: btnAddLyrics
                     text: "+ LYRICS TRACK"
                     implicitWidth: 100
