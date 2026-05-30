@@ -28,6 +28,34 @@ Rectangle {
         return (timeUs / 1000000.0) * zoomFactor;
     }
 
+    Connections {
+        target: timelineManager
+        function onCurrentPlayheadTimeChanged() {
+            if (audioEngine.isPlaying && timelineScroll.contentItem) {
+                var playheadX = 180 + timeToX(timelineManager.currentPlayheadTime);
+                var viewX = timelineScroll.contentItem.contentX;
+                var viewW = timelineScroll.width;
+                
+                if (viewW > 180) {
+                    // Scroll forward if playhead is near the right edge of viewport
+                    if (playheadX > viewX + viewW - 50) {
+                        var trackAreaWidth = viewW - 180;
+                        var targetContentX = playheadX - 180 - (trackAreaWidth * 0.25);
+                        var maxContentX = timelineScroll.contentItem.contentWidth - viewW;
+                        timelineScroll.contentItem.contentX = Math.max(0, Math.min(targetContentX, maxContentX));
+                    }
+                    // Scroll backward if playhead is behind the visible tracks area (e.g. wrapped around or skipped back)
+                    else if (playheadX < viewX + 180) {
+                        var trackAreaWidth = viewW - 180;
+                        var targetContentX = playheadX - 180 - (trackAreaWidth * 0.25);
+                        var maxContentX = timelineScroll.contentItem.contentWidth - viewW;
+                        timelineScroll.contentItem.contentX = Math.max(0, Math.min(targetContentX, maxContentX));
+                    }
+                }
+            }
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -338,6 +366,10 @@ Rectangle {
                     MouseArea {
                         anchors.fill: parent
                         onPressed: (mouse) => {
+                            if (mouse.x < 180 + timelineRoot.scrollX) {
+                                mouse.accepted = false;
+                                return;
+                            }
                             var posX = Math.max(180 + timelineRoot.scrollX, mouse.x);
                             var timeUs = xToTime(posX - 180);
                             timelineManager.currentPlayheadTime = Math.max(0, timeUs);

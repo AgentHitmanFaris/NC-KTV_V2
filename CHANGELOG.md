@@ -21,6 +21,7 @@ All notable changes to this project will be documented in this file.
 - Automated auto-put logic to instantly place imported media files into compatible tracks at the current playhead time on the timeline.
 - Fully functional "+ VIDEO TRACK" creation button in the timeline control header.
 - Custom orange color accents and layout styling tags for Video Tracks inside the timeline lane headers.
+- Horizontal playback auto-scrolling viewport follow in TimelineView.qml, automatically keeping the playhead visible and centered at 25% of the tracks area during active playback.
 
 ### Changed
 - Refactored C++ `StemSeparator` spectrogram representations from pointer-chasing 3D vectors to flat 1D contiguous vectors to improve cache locality.
@@ -36,3 +37,5 @@ All notable changes to this project will be documented in this file.
 - Corrected alignment of timeline ruler ticks and playhead lines by offsetting coordinates with the 180px track header boundary.
 - Fixed stem separation track duplication by searching for and reusing existing audio tracks.
 - Resolved video clip placement bugs where Video files incorrectly mapped to Audio tracks and could not be loaded into Video lanes.
+- Fixed playhead jumping when clicking on track headers in TimelineView.qml by adding a bounds check to the ruler MouseArea.
+
