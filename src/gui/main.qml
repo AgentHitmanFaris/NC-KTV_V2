@@ -90,8 +90,8 @@ ApplicationWindow {
             return "";
         }
         
-        onStatusChanged: {
-            if (status === MediaPlayer.LoadedMedia) {
+        onMediaStatusChanged: {
+            if (mediaStatus === MediaPlayer.LoadedMedia) {
                 if (rootWindow.activeVideoClip) {
                     var seekPosMs = (timelineManager.currentPlayheadTime - rootWindow.activeVideoClip.startTime) / 1000;
                     position = Math.max(0, seekPosMs);
