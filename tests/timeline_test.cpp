@@ -529,6 +529,102 @@ void testRenderEngineInitialization() {
     std::cout << "[PASS] Render Engine Initialization test completed successfully.\n\n";
 }
 
+void testMarkersAndSubtitleStyles() {
+    std::cout << "[TEST] Running Markers & Subtitle Styles test...\n";
+
+    TimelineManager manager;
+
+    // Test default subtitle styles
+    assert(manager.subtitleFontFamily() == "Outfit");
+    assert(manager.subtitleFontSize() == 24);
+    assert(manager.subtitleFillColor() == "#4A4A5A");
+    assert(manager.subtitleActiveColor() == "#00E676");
+    assert(manager.subtitleOutlineColor() == "#08080A");
+    assert(manager.subtitleOutlineWidth() == 2);
+
+    // Modify subtitle styles
+    manager.setSubtitleFontFamily("Inter");
+    manager.setSubtitleFontSize(32);
+    manager.setSubtitleFillColor("#FFFFFF");
+    manager.setSubtitleActiveColor("#FF4081");
+    manager.setSubtitleOutlineColor("#2C2C35");
+    manager.setSubtitleOutlineWidth(5);
+
+    assert(manager.subtitleFontFamily() == "Inter");
+    assert(manager.subtitleFontSize() == 32);
+    assert(manager.subtitleFillColor() == "#FFFFFF");
+    assert(manager.subtitleActiveColor() == "#FF4081");
+    assert(manager.subtitleOutlineColor() == "#2C2C35");
+    assert(manager.subtitleOutlineWidth() == 5);
+
+    // Test sequence markers
+    assert(manager.markers().isEmpty());
+
+    manager.addMarker(10000000LL, "Intro Chorus", "blue");
+    manager.addMarker(5000000LL, "First Vocal", "green");
+    manager.addMarker(20000000LL, "Outro", "yellow");
+
+    QVariantList markers = manager.markers();
+    assert(markers.size() == 3);
+
+    // They should be sorted by timeUs ascending: 5s, 10s, 20s
+    assert(markers[0].toMap()["timeUs"].toLongLong() == 5000000LL);
+    assert(markers[0].toMap()["name"].toString() == "First Vocal");
+    assert(markers[0].toMap()["color"].toString() == "green");
+
+    assert(markers[1].toMap()["timeUs"].toLongLong() == 10000000LL);
+    assert(markers[1].toMap()["name"].toString() == "Intro Chorus");
+    assert(markers[1].toMap()["color"].toString() == "blue");
+
+    assert(markers[2].toMap()["timeUs"].toLongLong() == 20000000LL);
+    assert(markers[2].toMap()["name"].toString() == "Outro");
+    assert(markers[2].toMap()["color"].toString() == "yellow");
+
+    QString markerId1 = markers[0].toMap()["id"].toString();
+    QString markerId2 = markers[1].toMap()["id"].toString();
+
+    // Update marker
+    manager.updateMarker(markerId1, "Vocal Start", "red");
+    QVariantList updated = manager.markers();
+    assert(updated[0].toMap()["name"].toString() == "Vocal Start");
+    assert(updated[0].toMap()["color"].toString() == "red");
+
+    // Remove marker
+    manager.removeMarker(markerId2);
+    assert(manager.markers().size() == 2);
+    assert(manager.markers()[0].toMap()["name"].toString() == "Vocal Start");
+    assert(manager.markers()[1].toMap()["name"].toString() == "Outro");
+
+    // Test project save/load serialization of styles and markers
+    QString savePath = QDir::tempPath() + "/test_markers_project.nctv";
+    bool saved = manager.saveProject(savePath);
+    assert(saved);
+
+    manager.clearProject();
+    assert(manager.markers().isEmpty());
+    assert(manager.subtitleFontFamily() == "Outfit"); // Reset to defaults on clear
+
+    bool loaded = manager.loadProject(savePath);
+    assert(loaded);
+
+    // Verify properties loaded successfully
+    assert(manager.subtitleFontFamily() == "Inter");
+    assert(manager.subtitleFontSize() == 32);
+    assert(manager.subtitleFillColor() == "#FFFFFF");
+    assert(manager.subtitleActiveColor() == "#FF4081");
+    assert(manager.subtitleOutlineColor() == "#2C2C35");
+    assert(manager.subtitleOutlineWidth() == 5);
+
+    assert(manager.markers().size() == 2);
+    assert(manager.markers()[0].toMap()["name"].toString() == "Vocal Start");
+    assert(manager.markers()[0].toMap()["color"].toString() == "red");
+    assert(manager.markers()[1].toMap()["name"].toString() == "Outro");
+    assert(manager.markers()[1].toMap()["color"].toString() == "yellow");
+
+    QFile::remove(savePath);
+    std::cout << "[PASS] Markers & Subtitle Styles test completed successfully.\n\n";
+}
+
 int main(int argc, char* argv[]) {
     QCoreApplication app(argc, argv);
     
@@ -548,6 +644,7 @@ int main(int argc, char* argv[]) {
     testStemSeparatorFallback();
     testOfflineMixdown();
     testRenderEngineInitialization();
+    testMarkersAndSubtitleStyles();
     
     std::cout << "========================================================\n";
     std::cout << "       ALL TIMELINE CORE TESTS PASSED SUCCESSFULLY!     \n";

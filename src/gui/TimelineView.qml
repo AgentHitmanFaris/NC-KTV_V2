@@ -385,6 +385,62 @@ Rectangle {
                             timelineManager.currentPlayheadTime = Math.max(0, timeUs);
                         }
                     }
+
+                    // Sequence Markers Overlay
+                    Repeater {
+                        model: timelineManager.markers
+                        delegate: Item {
+                            width: 14
+                            height: 16
+                            x: 180 + timeToX(modelData.timeUs) - width / 2
+                            y: 0
+                            z: 12
+
+                            // Triangle flag rotated 45 degrees
+                            Rectangle {
+                                width: 10
+                                height: 10
+                                color: {
+                                    if (modelData.color === "green") return "#00E676";
+                                    if (modelData.color === "red") return "#FF5252";
+                                    if (modelData.color === "blue") return "#29B6F6";
+                                    if (modelData.color === "yellow") return "#FFCA28";
+                                    return "#00E676";
+                                }
+                                rotation: 45
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                y: 1
+                                border.color: "#FFF"
+                                border.width: 1
+                            }
+
+                            // Little stem pointing down to tick
+                            Rectangle {
+                                width: 2
+                                height: 6
+                                color: "#FFF"
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                anchors.bottom: parent.bottom
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                id: markerMouseArea
+
+                                ToolTip.visible: containsMouse
+                                ToolTip.text: modelData.name + " (" + timelineManager.formatTimecode(modelData.timeUs) + ")"
+                                ToolTip.delay: 200
+
+                                onClicked: {
+                                    timelineManager.currentPlayheadTime = modelData.timeUs;
+                                }
+                                onDoubleClicked: {
+                                    rootWindow.openMarkerDialog(modelData);
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // Track Lanes vertical stack

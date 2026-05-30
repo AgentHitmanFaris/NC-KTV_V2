@@ -205,6 +205,14 @@ ApplicationWindow {
         return 1.0;
     }
 
+    function openMarkerDialog(marker) {
+        markerDialog.markerId = marker.id;
+        markerDialog.markerName = marker.name;
+        markerDialog.markerColor = marker.color;
+        markerDialog.markerTimeUs = marker.timeUs;
+        markerDialog.open();
+    }
+
     // Keyboard Shortcuts
     Shortcut {
         sequence: "Space"
@@ -249,6 +257,204 @@ ApplicationWindow {
                 var deleted = propertiesPanel.selectedTrack.removeClip(propertiesPanel.selectedClip.clipId);
                 if (deleted) {
                     propertiesPanel.selectedClip = null;
+                }
+            }
+        }
+    }
+
+    Shortcut {
+        sequence: "Left"
+        enabled: !activeFocusItem || !(activeFocusItem.hasOwnProperty("textSelectionStart") || activeFocusItem.textSelectionStart !== undefined)
+        onActivated: {
+            var step = 1000000.0 / timelineManager.fps;
+            timelineManager.currentPlayheadTime = Math.max(0, timelineManager.currentPlayheadTime - step);
+        }
+    }
+    Shortcut {
+        sequence: "Right"
+        enabled: !activeFocusItem || !(activeFocusItem.hasOwnProperty("textSelectionStart") || activeFocusItem.textSelectionStart !== undefined)
+        onActivated: {
+            var step = 1000000.0 / timelineManager.fps;
+            timelineManager.currentPlayheadTime = Math.min(timelineManager.totalDuration, timelineManager.currentPlayheadTime + step);
+        }
+    }
+    Shortcut {
+        sequence: "Shift+Left"
+        enabled: !activeFocusItem || !(activeFocusItem.hasOwnProperty("textSelectionStart") || activeFocusItem.textSelectionStart !== undefined)
+        onActivated: {
+            timelineManager.currentPlayheadTime = Math.max(0, timelineManager.currentPlayheadTime - 1000000);
+        }
+    }
+    Shortcut {
+        sequence: "Shift+Right"
+        enabled: !activeFocusItem || !(activeFocusItem.hasOwnProperty("textSelectionStart") || activeFocusItem.textSelectionStart !== undefined)
+        onActivated: {
+            timelineManager.currentPlayheadTime = Math.min(timelineManager.totalDuration, timelineManager.currentPlayheadTime + 1000000);
+        }
+    }
+    Shortcut {
+        sequence: "Up"
+        enabled: !activeFocusItem || !(activeFocusItem.hasOwnProperty("textSelectionStart") || activeFocusItem.textSelectionStart !== undefined)
+        onActivated: {
+            var time = timelineManager.currentPlayheadTime;
+            var boundaries = [0];
+            var tracks = [];
+            if (propertiesPanel.selectedTrack) {
+                tracks.push(propertiesPanel.selectedTrack);
+            } else {
+                for (var i = 0; i < timelineManager.trackListModel.rowCount(); ++i) {
+                    tracks.push(timelineManager.trackListModel.tracks()[i]);
+                }
+            }
+            for (var t = 0; t < tracks.length; ++t) {
+                var track = tracks[t];
+                if (track) {
+                    var clips = track.clips();
+                    for (var c = 0; c < clips.length; ++c) {
+                        var clip = clips[c];
+                        boundaries.push(clip.startTime);
+                        boundaries.push(clip.endTime);
+                    }
+                }
+            }
+            boundaries.sort(function(a, b) { return a - b; });
+            var target = 0;
+            for (var b = boundaries.length - 1; b >= 0; --b) {
+                if (boundaries[b] < time - 50000) { // 50ms tolerance
+                    target = boundaries[b];
+                    break;
+                }
+            }
+            timelineManager.currentPlayheadTime = target;
+        }
+    }
+    Shortcut {
+        sequence: "Down"
+        enabled: !activeFocusItem || !(activeFocusItem.hasOwnProperty("textSelectionStart") || activeFocusItem.textSelectionStart !== undefined)
+        onActivated: {
+            var time = timelineManager.currentPlayheadTime;
+            var boundaries = [];
+            var tracks = [];
+            if (propertiesPanel.selectedTrack) {
+                tracks.push(propertiesPanel.selectedTrack);
+            } else {
+                for (var i = 0; i < timelineManager.trackListModel.rowCount(); ++i) {
+                    tracks.push(timelineManager.trackListModel.tracks()[i]);
+                }
+            }
+            for (var t = 0; t < tracks.length; ++t) {
+                var track = tracks[t];
+                if (track) {
+                    var clips = track.clips();
+                    for (var c = 0; c < clips.length; ++c) {
+                        var clip = clips[c];
+                        boundaries.push(clip.startTime);
+                        boundaries.push(clip.endTime);
+                    }
+                }
+            }
+            boundaries.push(timelineManager.totalDuration);
+            boundaries.sort(function(a, b) { return a - b; });
+            var target = timelineManager.totalDuration;
+            for (var b = 0; b < boundaries.length; ++b) {
+                if (boundaries[b] > time + 50000) { // 50ms tolerance
+                    target = boundaries[b];
+                    break;
+                }
+            }
+            timelineManager.currentPlayheadTime = target;
+        }
+    }
+    Shortcut {
+        sequence: "Ctrl+K"
+        enabled: !activeFocusItem || !(activeFocusItem.hasOwnProperty("textSelectionStart") || activeFocusItem.textSelectionStart !== undefined)
+        onActivated: {
+            var time = timelineManager.currentPlayheadTime;
+            if (propertiesPanel.selectedTrack) {
+                var clips = propertiesPanel.selectedTrack.clips();
+                for (var c = 0; c < clips.length; ++c) {
+                    var clip = clips[c];
+                    if (time > clip.startTime && time < clip.endTime) {
+                        timelineManager.splitClip(propertiesPanel.selectedTrack.trackId, clip.clipId, time);
+                        break;
+                    }
+                }
+            } else {
+                for (var i = 0; i < timelineManager.trackListModel.rowCount(); ++i) {
+                    var track = timelineManager.trackListModel.tracks()[i];
+                    if (track) {
+                        var clips = track.clips();
+                        for (var c = 0; c < clips.length; ++c) {
+                            var clip = clips[c];
+                            if (time > clip.startTime && time < clip.endTime) {
+                                timelineManager.splitClip(track.trackId, clip.clipId, time);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Shortcut {
+        sequence: "C"
+        enabled: !activeFocusItem || !(activeFocusItem.hasOwnProperty("textSelectionStart") || activeFocusItem.textSelectionStart !== undefined)
+        onActivated: {
+            var time = timelineManager.currentPlayheadTime;
+            if (propertiesPanel.selectedTrack) {
+                var clips = propertiesPanel.selectedTrack.clips();
+                for (var c = 0; c < clips.length; ++c) {
+                    var clip = clips[c];
+                    if (time > clip.startTime && time < clip.endTime) {
+                        timelineManager.splitClip(propertiesPanel.selectedTrack.trackId, clip.clipId, time);
+                        break;
+                    }
+                }
+            } else {
+                for (var i = 0; i < timelineManager.trackListModel.rowCount(); ++i) {
+                    var track = timelineManager.trackListModel.tracks()[i];
+                    if (track) {
+                        var clips = track.clips();
+                        for (var c = 0; c < clips.length; ++c) {
+                            var clip = clips[c];
+                            if (time > clip.startTime && time < clip.endTime) {
+                                timelineManager.splitClip(track.trackId, clip.clipId, time);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Shortcut {
+        sequence: "M"
+        enabled: !activeFocusItem || !(activeFocusItem.hasOwnProperty("textSelectionStart") || activeFocusItem.textSelectionStart !== undefined)
+        onActivated: {
+            var time = timelineManager.currentPlayheadTime;
+            var markers = timelineManager.markers;
+            var found = null;
+            for (var i = 0; i < markers.length; ++i) {
+                var m = markers[i];
+                if (Math.abs(m.timeUs - time) < 500000) {
+                    found = m;
+                    break;
+                }
+            }
+            if (found) {
+                rootWindow.openMarkerDialog(found);
+            } else {
+                timelineManager.addMarker(time, "Marker " + (markers.length + 1), "green");
+                var updatedMarkers = timelineManager.markers;
+                var newMarker = null;
+                for (var j = 0; j < updatedMarkers.length; ++j) {
+                    if (updatedMarkers[j].timeUs === time) {
+                        newMarker = updatedMarkers[j];
+                        break;
+                    }
+                }
+                if (newMarker) {
+                    rootWindow.openMarkerDialog(newMarker);
                 }
             }
         }
@@ -757,16 +963,35 @@ ApplicationWindow {
                                 return rootWindow.calculateClipSweepProgress(activeClip, timelineManager.currentPlayheadTime);
                             }
 
+                            // Inactive outline behind baseTextLabel
+                            Repeater {
+                                model: timelineManager.subtitleOutlineWidth > 0 ? 8 : 0
+                                delegate: Label {
+                                    text: baseTextLabel.text
+                                    font.family: timelineManager.subtitleFontFamily
+                                    font.pixelSize: timelineManager.subtitleFontSize
+                                    font.bold: true
+                                    color: timelineManager.subtitleOutlineColor
+                                    anchors.centerIn: parent
+                                    anchors.horizontalCenterOffset: {
+                                        var angle = (index / 8) * 2 * Math.PI;
+                                        return Math.cos(angle) * timelineManager.subtitleOutlineWidth;
+                                    }
+                                    anchors.verticalCenterOffset: {
+                                        var angle = (index / 8) * 2 * Math.PI;
+                                        return Math.sin(angle) * timelineManager.subtitleOutlineWidth;
+                                    }
+                                }
+                            }
+
                             // Base Inactive Text (Slate color)
                             Label {
                                 id: baseTextLabel
                                 text: activeLineWrapper.activeClip ? activeLineWrapper.activeClip.lyricText : (activeLineWrapper.nextClip ? "" : "(Waiting for lyric cues)")
-                                font.pixelSize: 22
+                                font.pixelSize: timelineManager.subtitleFontSize
                                 font.bold: true
-                                color: "#4A4A5A"
-                                style: Text.Outline
-                                styleColor: "#08080A"
-                                font.family: "Outfit"
+                                color: timelineManager.subtitleFillColor
+                                font.family: timelineManager.subtitleFontFamily
                                 anchors.centerIn: parent
                                 horizontalAlignment: Text.AlignHCenter
                             }
@@ -779,14 +1004,35 @@ ApplicationWindow {
                                 width: activeLineWrapper.sweepProgress * baseTextLabel.width
                                 clip: true
 
+                                // Active outline behind the active text
+                                Repeater {
+                                    model: timelineManager.subtitleOutlineWidth > 0 ? 8 : 0
+                                    delegate: Label {
+                                        text: baseTextLabel.text
+                                        font.family: timelineManager.subtitleFontFamily
+                                        font.pixelSize: timelineManager.subtitleFontSize
+                                        font.bold: true
+                                        color: timelineManager.subtitleOutlineColor
+                                        width: baseTextLabel.width
+                                        anchors.left: parent.left
+                                        anchors.top: parent.top
+                                        anchors.leftMargin: {
+                                            var angle = (index / 8) * 2 * Math.PI;
+                                            return Math.cos(angle) * timelineManager.subtitleOutlineWidth;
+                                        }
+                                        anchors.topMargin: {
+                                            var angle = (index / 8) * 2 * Math.PI;
+                                            return Math.sin(angle) * timelineManager.subtitleOutlineWidth;
+                                        }
+                                    }
+                                }
+
                                 Label {
                                     text: baseTextLabel.text
-                                    font.pixelSize: 22
+                                    font.pixelSize: timelineManager.subtitleFontSize
                                     font.bold: true
-                                    color: rootWindow.colorAccentGreen
-                                    style: Text.Outline
-                                    styleColor: "#08080A"
-                                    font.family: "Outfit"
+                                    color: timelineManager.subtitleActiveColor
+                                    font.family: timelineManager.subtitleFontFamily
                                     width: baseTextLabel.width
                                     anchors.left: parent.left
                                     anchors.top: parent.top
@@ -868,6 +1114,199 @@ ApplicationWindow {
         }
         onRejected: {
             closeRequested = false;
+        }
+    }
+
+    Dialog {
+        id: markerDialog
+        title: "Edit Sequence Marker"
+        modal: true
+        anchors.centerIn: parent
+        width: 350
+        standardButtons: Dialog.NoButton
+
+        background: Rectangle {
+            color: rootWindow.colorBgPanel
+            border.color: rootWindow.colorAccentViolet
+            border.width: 2
+            radius: 8
+        }
+
+        header: Rectangle {
+            color: rootWindow.colorBgCard
+            height: 40
+            width: parent.width
+            radius: 8
+            
+            Label {
+                anchors.left: parent.left
+                anchors.leftMargin: 15
+                anchors.verticalCenter: parent.verticalCenter
+                text: "SEQUENCE MARKER EDITOR"
+                font.bold: true
+                font.pixelSize: 12
+                color: rootWindow.colorAccentViolet
+            }
+        }
+
+        property string markerId: ""
+        property string markerName: ""
+        property string markerColor: "green"
+        property qint64 markerTimeUs: 0
+        property string selectedColor: "green"
+
+        onOpened: {
+            markerNameField.text = markerName;
+            selectedColor = markerColor;
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 15
+            anchors.margins: 15
+
+            Label {
+                text: "Timecode: " + timelineManager.formatTimecode(markerDialog.markerTimeUs)
+                color: rootWindow.colorTextSecondary
+                font.pixelSize: 11
+            }
+
+            ColumnLayout {
+                spacing: 5
+                Layout.fillWidth: true
+                Label {
+                    text: "Name"
+                    color: rootWindow.colorTextPrimary
+                    font.bold: true
+                    font.pixelSize: 11
+                }
+                TextField {
+                    id: markerNameField
+                    Layout.fillWidth: true
+                    placeholderText: "Marker Name"
+                    color: rootWindow.colorTextPrimary
+                    background: Rectangle {
+                        color: "#16161D"
+                        border.color: markerNameField.activeFocus ? rootWindow.colorAccentViolet : rootWindow.colorBorder
+                        border.width: 1
+                        radius: 4
+                    }
+                }
+            }
+
+            ColumnLayout {
+                spacing: 5
+                Layout.fillWidth: true
+                Label {
+                    text: "Color"
+                    color: rootWindow.colorTextPrimary
+                    font.bold: true
+                    font.pixelSize: 11
+                }
+                RowLayout {
+                    spacing: 10
+                    Layout.fillWidth: true
+
+                    Repeater {
+                        model: [
+                            { name: "green", hex: "#00E676" },
+                            { name: "red", hex: "#FF5252" },
+                            { name: "blue", hex: "#29B6F6" },
+                            { name: "yellow", hex: "#FFCA28" }
+                        ]
+
+                        delegate: Rectangle {
+                            width: 28
+                            height: 28
+                            radius: 14
+                            color: modelData.hex
+                            border.color: markerDialog.selectedColor === modelData.name ? "#FFF" : "transparent"
+                            border.width: 2
+
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: markerDialog.selectedColor = modelData.name
+                            }
+
+                            scale: markerDialog.selectedColor === modelData.name ? 1.15 : 1.0
+                            Behavior on scale { NumberAnimation { duration: 100 } }
+                        }
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 10
+                
+                Button {
+                    id: btnDeleteMarker
+                    text: "DELETE"
+                    implicitHeight: 28
+                    Layout.fillWidth: true
+                    onClicked: {
+                        timelineManager.removeMarker(markerDialog.markerId);
+                        markerDialog.close();
+                    }
+                    background: Rectangle {
+                        color: btnDeleteMarker.hovered ? "#EF5350" : "#C62828"
+                        radius: 4
+                    }
+                    contentItem: Text {
+                        text: btnDeleteMarker.text
+                        font.bold: true
+                        font.pixelSize: 10
+                        color: "#FFF"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+
+                Button {
+                    id: btnSaveMarker
+                    text: "OK"
+                    implicitHeight: 28
+                    Layout.fillWidth: true
+                    onClicked: {
+                        timelineManager.updateMarker(markerDialog.markerId, markerNameField.text, markerDialog.selectedColor);
+                        markerDialog.close();
+                    }
+                    background: Rectangle {
+                        color: btnSaveMarker.hovered ? rootWindow.colorAccentGreen : "#00A354"
+                        radius: 4
+                    }
+                    contentItem: Text {
+                        text: btnSaveMarker.text
+                        font.bold: true
+                        font.pixelSize: 10
+                        color: "#000"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+
+                Button {
+                    id: btnCancelMarker
+                    text: "CANCEL"
+                    implicitHeight: 28
+                    Layout.fillWidth: true
+                    onClicked: {
+                        markerDialog.close();
+                    }
+                    background: Rectangle {
+                        color: btnCancelMarker.hovered ? "#3E3E4D" : "#2C2C35"
+                        radius: 4
+                        border.color: rootWindow.colorBorder
+                    }
+                    contentItem: Text {
+                        text: btnCancelMarker.text
+                        font.bold: true
+                        font.pixelSize: 10
+                        color: rootWindow.colorTextSecondary
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+            }
         }
     }
 

@@ -15,6 +15,16 @@ class TimelineManager : public QObject {
 
     Q_PROPERTY(QVariantList mediaList READ mediaList WRITE setMediaList NOTIFY mediaListChanged)
     Q_PROPERTY(bool isDirty READ isDirty WRITE setIsDirty NOTIFY isDirtyChanged)
+    
+    // Subtitle styles and timeline markers properties
+    Q_PROPERTY(QVariantList markers READ markers WRITE setMarkers NOTIFY markersChanged)
+    Q_PROPERTY(QString subtitleFontFamily READ subtitleFontFamily WRITE setSubtitleFontFamily NOTIFY subtitleFontFamilyChanged)
+    Q_PROPERTY(int subtitleFontSize READ subtitleFontSize WRITE setSubtitleFontSize NOTIFY subtitleFontSizeChanged)
+    Q_PROPERTY(QString subtitleFillColor READ subtitleFillColor WRITE setSubtitleFillColor NOTIFY subtitleFillColorChanged)
+    Q_PROPERTY(QString subtitleActiveColor READ subtitleActiveColor WRITE setSubtitleActiveColor NOTIFY subtitleActiveColorChanged)
+    Q_PROPERTY(QString subtitleOutlineColor READ subtitleOutlineColor WRITE setSubtitleOutlineColor NOTIFY subtitleOutlineColorChanged)
+    Q_PROPERTY(int subtitleOutlineWidth READ subtitleOutlineWidth WRITE setSubtitleOutlineWidth NOTIFY subtitleOutlineWidthChanged)
+
 
     Q_PROPERTY(qint64 currentPlayheadTime READ currentPlayheadTime WRITE setCurrentPlayheadTime NOTIFY currentPlayheadTimeChanged)
     Q_PROPERTY(qint64 totalDuration READ totalDuration WRITE setTotalDuration NOTIFY totalDurationChanged)
@@ -54,13 +64,39 @@ public:
     [[nodiscard]] double renderProgress() const { return m_renderProgress; }
     [[nodiscard]] QString renderStatusText() const { return m_renderStatusText; }
 
-    // Getters and Setters
     [[nodiscard]] QVariantList mediaList() const { return m_mediaList; }
     void setMediaList(const QVariantList& list);
 
     [[nodiscard]] bool isDirty() const { return m_isDirty; }
     void setIsDirty(bool dirty);
     Q_INVOKABLE void setDirty(bool dirty = true) { setIsDirty(dirty); }
+
+    // Subtitle style getters & setters
+    [[nodiscard]] QString subtitleFontFamily() const { return m_subtitleFontFamily; }
+    void setSubtitleFontFamily(const QString& family);
+
+    [[nodiscard]] int subtitleFontSize() const { return m_subtitleFontSize; }
+    void setSubtitleFontSize(int size);
+
+    [[nodiscard]] QString subtitleFillColor() const { return m_subtitleFillColor; }
+    void setSubtitleFillColor(const QString& color);
+
+    [[nodiscard]] QString subtitleActiveColor() const { return m_subtitleActiveColor; }
+    void setSubtitleActiveColor(const QString& color);
+
+    [[nodiscard]] QString subtitleOutlineColor() const { return m_subtitleOutlineColor; }
+    void setSubtitleOutlineColor(const QString& color);
+
+    [[nodiscard]] int subtitleOutlineWidth() const { return m_subtitleOutlineWidth; }
+    void setSubtitleOutlineWidth(int width);
+
+    // Markers getter, setter, and operations
+    [[nodiscard]] QVariantList markers() const { return m_markers; }
+    void setMarkers(const QVariantList& list);
+    Q_INVOKABLE void addMarker(qint64 timeUs, const QString& name = "Marker", const QString& color = "green");
+    Q_INVOKABLE void removeMarker(const QString& markerId);
+    Q_INVOKABLE void updateMarker(const QString& markerId, const QString& name, const QString& color);
+
 
     [[nodiscard]] qint64 currentPlayheadTime() const { return m_currentPlayheadTime; }
     void setCurrentPlayheadTime(qint64 timeMicroseconds);
@@ -124,6 +160,16 @@ signals:
     void mediaListChanged();
     void isDirtyChanged();
     void mediaSeparationCompleted(const QString& vocalsPath, const QString& instPath);
+    
+    // Subtitle style and markers signals
+    void subtitleFontFamilyChanged();
+    void subtitleFontSizeChanged();
+    void subtitleFillColorChanged();
+    void subtitleActiveColorChanged();
+    void subtitleOutlineColorChanged();
+    void subtitleOutlineWidthChanged();
+    void markersChanged();
+
 
 private slots:
     void onSeparationProgress(double fraction);
@@ -160,6 +206,16 @@ private:
     QStringList m_discoveredModelPaths;
     QVariantList m_mediaList;
     bool m_isDirty = false;
+
+    // Subtitle style and markers variables
+    QVariantList m_markers;
+    QString m_subtitleFontFamily = "Outfit";
+    int m_subtitleFontSize = 24;
+    QString m_subtitleFillColor = "#4A4A5A";
+    QString m_subtitleActiveColor = "#00E676";
+    QString m_subtitleOutlineColor = "#08080A";
+    int m_subtitleOutlineWidth = 2;
 };
+
 
 } // namespace ncktv

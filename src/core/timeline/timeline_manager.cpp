@@ -149,6 +149,113 @@ void TimelineManager::setIsDirty(bool dirty) {
     }
 }
 
+void TimelineManager::setSubtitleFontFamily(const QString& family) {
+    if (m_subtitleFontFamily != family) {
+        m_subtitleFontFamily = family;
+        setIsDirty(true);
+        emit subtitleFontFamilyChanged();
+    }
+}
+
+void TimelineManager::setSubtitleFontSize(int size) {
+    if (m_subtitleFontSize != size) {
+        m_subtitleFontSize = size;
+        setIsDirty(true);
+        emit subtitleFontSizeChanged();
+    }
+}
+
+void TimelineManager::setSubtitleFillColor(const QString& color) {
+    if (m_subtitleFillColor != color) {
+        m_subtitleFillColor = color;
+        setIsDirty(true);
+        emit subtitleFillColorChanged();
+    }
+}
+
+void TimelineManager::setSubtitleActiveColor(const QString& color) {
+    if (m_subtitleActiveColor != color) {
+        m_subtitleActiveColor = color;
+        setIsDirty(true);
+        emit subtitleActiveColorChanged();
+    }
+}
+
+void TimelineManager::setSubtitleOutlineColor(const QString& color) {
+    if (m_subtitleOutlineColor != color) {
+        m_subtitleOutlineColor = color;
+        setIsDirty(true);
+        emit subtitleOutlineColorChanged();
+    }
+}
+
+void TimelineManager::setSubtitleOutlineWidth(int width) {
+    if (m_subtitleOutlineWidth != width) {
+        m_subtitleOutlineWidth = width;
+        setIsDirty(true);
+        emit subtitleOutlineWidthChanged();
+    }
+}
+
+void TimelineManager::setMarkers(const QVariantList& list) {
+    if (m_markers != list) {
+        m_markers = list;
+        setIsDirty(true);
+        emit markersChanged();
+    }
+}
+
+void TimelineManager::addMarker(qint64 timeUs, const QString& name, const QString& color) {
+    QVariantMap marker;
+    marker["id"] = QUuid::createUuid().toString(QUuid::Id128);
+    marker["timeUs"] = timeUs;
+    marker["name"] = name;
+    marker["color"] = color;
+    m_markers.append(marker);
+
+    // Sort markers by timeUs
+    std::sort(m_markers.begin(), m_markers.end(), [](const QVariant& a, const QVariant& b) {
+        return a.toMap()["timeUs"].toLongLong() < b.toMap()["timeUs"].toLongLong();
+    });
+
+    setIsDirty(true);
+    emit markersChanged();
+}
+
+void TimelineManager::removeMarker(const QString& markerId) {
+    bool found = false;
+    for (int i = 0; i < m_markers.size(); ++i) {
+        if (m_markers[i].toMap()["id"].toString() == markerId) {
+            m_markers.removeAt(i);
+            found = true;
+            break;
+        }
+    }
+    if (found) {
+        setIsDirty(true);
+        emit markersChanged();
+    }
+}
+
+void TimelineManager::updateMarker(const QString& markerId, const QString& name, const QString& color) {
+    bool found = false;
+    for (int i = 0; i < m_markers.size(); ++i) {
+        QVariantMap marker = m_markers[i].toMap();
+        if (marker["id"].toString() == markerId) {
+            marker["name"] = name;
+            marker["color"] = color;
+            m_markers[i] = marker;
+            found = true;
+            break;
+        }
+    }
+    if (found) {
+        setIsDirty(true);
+        emit markersChanged();
+    }
+}
+
+
 QString TimelineManager::addTrack(int type, const QString& name) {
     auto castedType = static_cast<Track::Type>(type);
     Track* track = new Track(QString(), castedType, name, this);
@@ -463,6 +570,29 @@ bool TimelineManager::saveProject(const QString& filePath) {
     }
     j["mediaList"] = mediaJson;
 
+    // Save subtitle style
+    nlohmann::json subtitleJson = nlohmann::json::object();
+    subtitleJson["fontFamily"] = m_subtitleFontFamily.toStdString();
+    subtitleJson["fontSize"] = m_subtitleFontSize;
+    subtitleJson["fillColor"] = m_subtitleFillColor.toStdString();
+    subtitleJson["activeColor"] = m_subtitleActiveColor.toStdString();
+    subtitleJson["outlineColor"] = m_subtitleOutlineColor.toStdString();
+    subtitleJson["outlineWidth"] = m_subtitleOutlineWidth;
+    j["subtitleStyle"] = subtitleJson;
+
+    // Save markers
+    nlohmann::json markersJson = nlohmann::json::array();
+    for (const QVariant& item : m_markers) {
+        QVariantMap map = item.toMap();
+        nlohmann::json markerObj = nlohmann::json::object();
+        markerObj["id"] = map["id"].toString().toStdString();
+        markerObj["timeUs"] = map["timeUs"].toLongLong();
+        markerObj["name"] = map["name"].toString().toStdString();
+        markerObj["color"] = map["color"].toString().toStdString();
+        markersJson.push_back(markerObj);
+    }
+    j["markers"] = markersJson;
+
     QFile file(filePath);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
         return false;
@@ -518,9 +648,53 @@ bool TimelineManager::loadProject(const QString& filePath) {
         }
         setMediaList(mediaList);
 
+        // Load subtitle style
+        if (j.contains("subtitleStyle") && j["subtitleStyle"].is_object()) {
+            const auto& subtitleJson = j["subtitleStyle"];
+            m_subtitleFontFamily = QString::fromStdString(subtitleJson.value("fontFamily", "Outfit"));
+            m_subtitleFontSize = subtitleJson.value("fontSize", 24);
+            m_subtitleFillColor = QString::fromStdString(subtitleJson.value("fillColor", "#4A4A5A"));
+            m_subtitleActiveColor = QString::fromStdString(subtitleJson.value("activeColor", "#00E676"));
+            m_subtitleOutlineColor = QString::fromStdString(subtitleJson.value("outlineColor", "#08080A"));
+            m_subtitleOutlineWidth = subtitleJson.value("outlineWidth", 2);
+        } else {
+            // Restore defaults
+            m_subtitleFontFamily = "Outfit";
+            m_subtitleFontSize = 24;
+            m_subtitleFillColor = "#4A4A5A";
+            m_subtitleActiveColor = "#00E676";
+            m_subtitleOutlineColor = "#08080A";
+            m_subtitleOutlineWidth = 2;
+        }
+
+        // Load markers
+        QVariantList loadedMarkers;
+        if (j.contains("markers") && j["markers"].is_array()) {
+            for (const auto& markerObj : j["markers"]) {
+                QVariantMap map;
+                map["id"] = QString::fromStdString(markerObj.value("id", ""));
+                map["timeUs"] = markerObj.value("timeUs", 0LL);
+                map["name"] = QString::fromStdString(markerObj.value("name", "Marker"));
+                map["color"] = QString::fromStdString(markerObj.value("color", "green"));
+                loadedMarkers.append(map);
+            }
+            // Sort just in case
+            std::sort(loadedMarkers.begin(), loadedMarkers.end(), [](const QVariant& a, const QVariant& b) {
+                return a.toMap()["timeUs"].toLongLong() < b.toMap()["timeUs"].toLongLong();
+            });
+        }
+        m_markers = loadedMarkers;
+
         emit fpsChanged();
         emit currentPlayheadTimeChanged();
         emit totalDurationChanged();
+        emit subtitleFontFamilyChanged();
+        emit subtitleFontSizeChanged();
+        emit subtitleFillColorChanged();
+        emit subtitleActiveColorChanged();
+        emit subtitleOutlineColorChanged();
+        emit subtitleOutlineWidthChanged();
+        emit markersChanged();
         emit projectLoaded();
         
         setIsDirty(false); // Reset dirty flag on successful load
@@ -565,6 +739,15 @@ void TimelineManager::clearProject() {
     
     m_mediaList.clear();
     emit mediaListChanged();
+    
+    m_markers.clear();
+    m_subtitleFontFamily = "Outfit";
+    m_subtitleFontSize = 24;
+    m_subtitleFillColor = "#4A4A5A";
+    m_subtitleActiveColor = "#00E676";
+    m_subtitleOutlineColor = "#08080A";
+    m_subtitleOutlineWidth = 2;
+
     setIsDirty(false);
     
     emit currentPlayheadTimeChanged();
@@ -575,6 +758,13 @@ void TimelineManager::clearProject() {
     emit isRenderingChanged();
     emit renderProgressChanged();
     emit renderStatusTextChanged();
+    emit subtitleFontFamilyChanged();
+    emit subtitleFontSizeChanged();
+    emit subtitleFillColorChanged();
+    emit subtitleActiveColorChanged();
+    emit subtitleOutlineColorChanged();
+    emit subtitleOutlineWidthChanged();
+    emit markersChanged();
     emit projectCleared();
 }
 

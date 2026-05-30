@@ -934,6 +934,204 @@ Rectangle {
                     }
                 }
             }
+
+            // Subtitle Styles Customizer Pane
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: 220
+                color: rootWindow.colorBgCard
+                border.color: rootWindow.colorBorder
+                border.width: 1
+                radius: 6
+                
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    spacing: 8
+                    
+                    Label {
+                        text: "TITLER SUBTITLE CUSTOMIZER"
+                        font.bold: true
+                        font.pixelSize: 10
+                        color: rootWindow.colorAccentViolet
+                        Layout.fillWidth: true
+                    }
+                    
+                    // Row 1: Font and Font Size
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+                        
+                        ColumnLayout {
+                            spacing: 2
+                            Layout.fillWidth: true
+                            Label {
+                                text: "Font Family"
+                                font.pixelSize: 9
+                                color: rootWindow.colorTextSecondary
+                            }
+                            ComboBox {
+                                id: fontCombo
+                                Layout.fillWidth: true
+                                implicitHeight: 26
+                                model: ["Outfit", "Inter", "Arial", "Courier New", "Times New Roman", "Impact"]
+                                currentIndex: model.indexOf(timelineManager.subtitleFontFamily) >= 0 ? model.indexOf(timelineManager.subtitleFontFamily) : 0
+                                onActivated: (index) => {
+                                    timelineManager.subtitleFontFamily = model[index];
+                                }
+                            }
+                        }
+                        
+                        ColumnLayout {
+                            spacing: 2
+                            Layout.fillWidth: true
+                            Label {
+                                text: "Font Size: " + timelineManager.subtitleFontSize + "px"
+                                font.pixelSize: 9
+                                color: rootWindow.colorTextSecondary
+                            }
+                            Slider {
+                                id: sizeSlider
+                                Layout.fillWidth: true
+                                implicitHeight: 26
+                                from: 10
+                                to: 60
+                                value: timelineManager.subtitleFontSize
+                                stepSize: 1
+                                onValueChanged: {
+                                    timelineManager.subtitleFontSize = Math.round(value);
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Row 2: Fill Color, Sweep Color, Outline Color selection
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+                        
+                        ColumnLayout {
+                            spacing: 2
+                            Layout.fillWidth: true
+                            Label {
+                                text: "Fill Color"
+                                font.pixelSize: 9
+                                color: rootWindow.colorTextSecondary
+                            }
+                            RowLayout {
+                                spacing: 4
+                                Repeater {
+                                    model: [
+                                        { hex: "#FFFFFF" },
+                                        { hex: "#4A4A5A" },
+                                        { hex: "#90CAF9" }
+                                    ]
+                                    delegate: Rectangle {
+                                        width: 18
+                                        height: 18
+                                        radius: 3
+                                        color: modelData.hex
+                                        border.color: timelineManager.subtitleFillColor === modelData.hex ? "#FFF" : rootWindow.colorBorder
+                                        border.width: 1
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            onClicked: timelineManager.subtitleFillColor = modelData.hex
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        ColumnLayout {
+                            spacing: 2
+                            Layout.fillWidth: true
+                            Label {
+                                text: "Active Sweep"
+                                font.pixelSize: 9
+                                color: rootWindow.colorTextSecondary
+                            }
+                            RowLayout {
+                                spacing: 4
+                                Repeater {
+                                    model: [
+                                        { hex: "#00E676" }, // Emerald Green
+                                        { hex: "#FF4081" }, // Hot Pink
+                                        { hex: "#00E5FF" }, // Turquoise
+                                        { hex: "#D500F9" }  // Purple
+                                    ]
+                                    delegate: Rectangle {
+                                        width: 18
+                                        height: 18
+                                        radius: 3
+                                        color: modelData.hex
+                                        border.color: timelineManager.subtitleActiveColor === modelData.hex ? "#FFF" : rootWindow.colorBorder
+                                        border.width: 1
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            onClicked: timelineManager.subtitleActiveColor = modelData.hex
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        ColumnLayout {
+                            spacing: 2
+                            Layout.fillWidth: true
+                            Label {
+                                text: "Outline Color"
+                                font.pixelSize: 9
+                                color: rootWindow.colorTextSecondary
+                            }
+                            RowLayout {
+                                spacing: 4
+                                Repeater {
+                                    model: [
+                                        { hex: "#08080A" }, // Black
+                                        { hex: "#2C2C35" }, // Dark Gray
+                                        { hex: "#0D47A1" }  // Navy Blue
+                                    ]
+                                    delegate: Rectangle {
+                                        width: 18
+                                        height: 18
+                                        radius: 3
+                                        color: modelData.hex
+                                        border.color: timelineManager.subtitleOutlineColor === modelData.hex ? "#FFF" : rootWindow.colorBorder
+                                        border.width: 1
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            onClicked: timelineManager.subtitleOutlineColor = modelData.hex
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Row 3: Outline Width slider
+                    ColumnLayout {
+                        spacing: 2
+                        Layout.fillWidth: true
+                        Label {
+                            text: "Outline Width: " + timelineManager.subtitleOutlineWidth + "px"
+                            font.pixelSize: 9
+                            color: rootWindow.colorTextSecondary
+                        }
+                        Slider {
+                            id: outlineSlider
+                            Layout.fillWidth: true
+                            implicitHeight: 26
+                            from: 0
+                            to: 10
+                            value: timelineManager.subtitleOutlineWidth
+                            stepSize: 1
+                            onValueChanged: {
+                                timelineManager.subtitleOutlineWidth = Math.round(value);
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
