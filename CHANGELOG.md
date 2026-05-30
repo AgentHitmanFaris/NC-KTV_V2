@@ -38,4 +38,5 @@ All notable changes to this project will be documented in this file.
 - Fixed stem separation track duplication by searching for and reusing existing audio tracks.
 - Resolved video clip placement bugs where Video files incorrectly mapped to Audio tracks and could not be loaded into Video lanes.
 - Fixed playhead jumping when clicking on track headers in TimelineView.qml by adding a bounds check to the ruler MouseArea.
+- Fixed ONNX Runtime GPU execution provider loader failure by updating the CMake post-build script to copy all runtime library DLLs (including cuda, tensorrt, and shared providers) to the executable directory, allowing CUDA GPU-accelerated stem separation.
 

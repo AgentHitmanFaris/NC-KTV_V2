@@ -59,14 +59,17 @@ target_link_libraries(NC-KTV_V2
 # Copy shared libraries (ONNX Runtime, FFmpeg DLLs) into target build output
 # directory so that the application executes seamlessly.
 if(WIN32)
-    # 1. Copy ONNX Runtime DLL
+    # 1. Copy ONNX Runtime DLLs (including providers for CUDA/TensorRT/etc.)
     if(TARGET onnx_shared)
-        add_custom_command(TARGET NC-KTV_V2 POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${ORT_DLL}"
-                $<TARGET_FILE_DIR:NC-KTV_V2>
-            COMMENT "Deploying ONNX Runtime DLL to build bin..."
-        )
+        file(GLOB ORT_DLLS "${onnxruntime_SOURCE_DIR}/lib/*.dll")
+        foreach(DLL_PATH ${ORT_DLLS})
+            add_custom_command(TARGET NC-KTV_V2 POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${DLL_PATH}"
+                    $<TARGET_FILE_DIR:NC-KTV_V2>
+                COMMENT "Deploying ONNX Runtime DLL ${DLL_PATH} to build bin..."
+            )
+        endforeach()
     endif()
 
     # 2. Copy FFmpeg Shared DLLs
