@@ -45,16 +45,58 @@ Rectangle {
             mediaBrowserRoot.addMediaFile(vocalsName, vocalsPath, "Audio", false);
             mediaBrowserRoot.addMediaFile(instName, instPath, "Audio", false);
         }
+        function onMediaListChanged() {
+            mockFilesModel.clear();
+            var list = timelineManager.mediaList;
+            for (var i = 0; i < list.length; ++i) {
+                var item = list[i];
+                mockFilesModel.append({
+                    "name": item.name,
+                    "path": item.path,
+                    "type": item.type,
+                    "durationMs": item.durationMs || 180000
+                });
+            }
+            mediaBrowserRoot.updateMatchingCount();
+        }
+    }
+
+    function updateMediaListInManager() {
+        var list = [];
+        for (var i = 0; i < mockFilesModel.count; ++i) {
+            var item = mockFilesModel.get(i);
+            list.push({
+                "name": item.name,
+                "path": item.path,
+                "type": item.type,
+                "durationMs": item.durationMs || 180000
+            });
+        }
+        timelineManager.mediaList = list;
+        timelineManager.setDirty(true);
     }
 
     function addMediaFile(name, path, type, autoPut) {
+        // Prevent duplicate entries in media browser
+        for (var i = 0; i < mockFilesModel.count; ++i) {
+            if (mockFilesModel.get(i).path === path) {
+                mediaBrowserRoot.selectedMediaIdx = i;
+                if (autoPut) {
+                    autoPutToTimeline(path, type);
+                }
+                return;
+            }
+        }
+
         mockFilesModel.append({
             "name": name,
             "path": path,
             "type": type,
             "durationMs": 180000
         });
-        selectedMediaIdx = mockFilesModel.count - 1;
+        mediaBrowserRoot.selectedMediaIdx = mockFilesModel.count - 1;
+
+        updateMediaListInManager();
 
         if (autoPut) {
             autoPutToTimeline(path, type);

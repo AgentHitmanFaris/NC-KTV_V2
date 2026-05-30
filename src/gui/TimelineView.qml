@@ -18,6 +18,8 @@ Rectangle {
     property double snapThresholdMs: 100.0 // 100 milliseconds threshold
 
     property real scrollX: timelineScroll.contentItem ? timelineScroll.contentItem.contentX : 0.0
+    property real scrollY: timelineScroll.contentItem ? timelineScroll.contentItem.contentY : 0.0
+
 
     // Microsecond timing coordinates mapper (converted to rounded integer for qlonglong matching)
     function xToTime(x) {
@@ -296,9 +298,12 @@ Rectangle {
                     id: timeRuler
                     width: parent.width
                     height: 28
+                    y: timelineRoot.scrollY
+                    z: 8
                     color: "#0D0D11"
                     border.color: rootWindow.colorBorder
                     border.width: 1
+
 
                     // Draw ruler second markers dynamically using Canvas
                     Canvas {
@@ -385,10 +390,11 @@ Rectangle {
                 // Track Lanes vertical stack
                 Column {
                     id: tracksColumn
-                    anchors.top: timeRuler.bottom
+                    y: 28
                     anchors.left: parent.left
                     anchors.right: parent.right
                     spacing: 1
+
 
                     Repeater {
                         model: timelineManager.trackListModel
@@ -516,11 +522,13 @@ Rectangle {
                 Rectangle {
                     id: playheadLine
                     x: 180 + timeToX(timelineManager.currentPlayheadTime)
-                    y: 0
+                    y: timelineRoot.scrollY
                     width: 2
-                    height: parent.height
+                    height: timelineScroll.height
                     color: rootWindow.colorAccentGreen
-                    z: 4 // Render on top of clips (default z:0) but behind track headers (z:5) and ruler cover (z:6)
+                    z: 9
+                    visible: x >= 180 + timelineRoot.scrollX
+
 
                     // Neon triangle cap
                     Rectangle {

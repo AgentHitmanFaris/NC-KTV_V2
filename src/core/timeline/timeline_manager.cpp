@@ -135,15 +135,34 @@ void TimelineManager::setFps(double fpsValue) {
     }
 }
 
+void TimelineManager::setMediaList(const QVariantList& list) {
+    if (m_mediaList != list) {
+        m_mediaList = list;
+        emit mediaListChanged();
+    }
+}
+
+void TimelineManager::setIsDirty(bool dirty) {
+    if (m_isDirty != dirty) {
+        m_isDirty = dirty;
+        emit isDirtyChanged();
+    }
+}
+
 QString TimelineManager::addTrack(int type, const QString& name) {
     auto castedType = static_cast<Track::Type>(type);
     Track* track = new Track(QString(), castedType, name, this);
     m_trackListModel->addTrack(track);
+    setIsDirty(true);
     return track->trackId();
 }
 
 bool TimelineManager::removeTrack(const QString& trackId) {
-    return m_trackListModel->removeTrack(trackId);
+    bool result = m_trackListModel->removeTrack(trackId);
+    if (result) {
+        setIsDirty(true);
+    }
+    return result;
 }
 
 QObject* TimelineManager::getClipModelForTrack(const QString& trackId) {
@@ -202,6 +221,7 @@ bool TimelineManager::addClipToTrack(const QString& trackId, const QString& clip
         delete clip;
         return false;
     }
+    setIsDirty(true);
     return true;
 }
 
@@ -257,6 +277,7 @@ bool TimelineManager::splitClip(const QString& trackId, const QString& clipId, q
         return false;
     }
 
+    setIsDirty(true);
     return true;
 }
 
@@ -429,6 +450,19 @@ bool TimelineManager::saveProject(const QString& filePath) {
     }
     j["tracks"] = tracksJson;
 
+    // Serialize media library list
+    nlohmann::json mediaJson = nlohmann::json::array();
+    for (const QVariant& item : m_mediaList) {
+        QVariantMap map = item.toMap();
+        nlohmann::json mediaItem = nlohmann::json::object();
+        mediaItem["name"] = map["name"].toString().toStdString();
+        mediaItem["path"] = map["path"].toString().toStdString();
+        mediaItem["type"] = map["type"].toString().toStdString();
+        mediaItem["durationMs"] = map["durationMs"].toLongLong();
+        mediaJson.push_back(mediaItem);
+    }
+    j["mediaList"] = mediaJson;
+
     QFile file(filePath);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
         return false;
@@ -437,6 +471,8 @@ bool TimelineManager::saveProject(const QString& filePath) {
     QTextStream out(&file);
     out << QString::fromStdString(j.dump(4));
     file.close();
+    
+    setIsDirty(false); // Reset dirty flag on successful save
     return true;
 }
 
@@ -468,10 +504,26 @@ bool TimelineManager::loadProject(const QString& filePath) {
             }
         }
 
+        // Deserialize media library list
+        QVariantList mediaList;
+        if (j.contains("mediaList") && j["mediaList"].is_array()) {
+            for (const auto& mediaItem : j["mediaList"]) {
+                QVariantMap map;
+                map["name"] = QString::fromStdString(mediaItem.value("name", ""));
+                map["path"] = QString::fromStdString(mediaItem.value("path", ""));
+                map["type"] = QString::fromStdString(mediaItem.value("type", ""));
+                map["durationMs"] = mediaItem.value("durationMs", 180000LL);
+                mediaList.append(map);
+            }
+        }
+        setMediaList(mediaList);
+
         emit fpsChanged();
         emit currentPlayheadTimeChanged();
         emit totalDurationChanged();
         emit projectLoaded();
+        
+        setIsDirty(false); // Reset dirty flag on successful load
         return true;
         
     } catch (...) {
@@ -510,6 +562,10 @@ void TimelineManager::clearProject() {
     m_isRendering = false;
     m_renderProgress = 0.0;
     m_renderStatusText = "";
+    
+    m_mediaList.clear();
+    emit mediaListChanged();
+    setIsDirty(false);
     
     emit currentPlayheadTimeChanged();
     emit totalDurationChanged();

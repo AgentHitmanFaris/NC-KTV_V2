@@ -3,6 +3,8 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import ncktv.gui
 import QtQuick.Dialogs
+import QtMultimedia
+
 
 
 ApplicationWindow {
@@ -26,6 +28,108 @@ ApplicationWindow {
 
     // Active project path tracking
     property string currentProjectPath: ""
+    property bool closeRequested: false
+
+    onClosing: (close) => {
+        if (timelineManager.isDirty) {
+            close.accepted = false;
+            closeRequested = true;
+            unsavedChangesDialog.open();
+        }
+    }
+
+    property var activeVideoClip: {
+        var time = timelineManager.currentPlayheadTime;
+        for (var i = 0; i < timelineManager.trackListModel.rowCount(); ++i) {
+            var track = timelineManager.trackListModel.tracks()[i];
+            if (track && track.trackType === 1) { // Video Track
+                var clips = track.clips();
+                for (var c = 0; c < clips.length; ++c) {
+                    var clip = clips[c];
+                    if (time >= clip.startTime && time <= clip.endTime) {
+                        return clip;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    onActiveVideoClipChanged: {
+        if (activeVideoClip) {
+            var seekPosMs = (timelineManager.currentPlayheadTime - activeVideoClip.startTime) / 1000;
+            videoPlayer.position = Math.max(0, seekPosMs);
+            if (audioEngine.isPlaying) {
+                videoPlayer.play();
+            } else {
+                videoPlayer.pause();
+            }
+        } else {
+            videoPlayer.stop();
+        }
+    }
+
+    MediaPlayer {
+        id: videoPlayer
+        audioOutput: AudioOutput {
+            muted: true // Muted because C++ AudioEngine plays the mixed audio stream
+        }
+        videoOutput: videoOutput
+        
+        source: {
+            if (rootWindow.activeVideoClip && rootWindow.activeVideoClip.sourceFile !== "") {
+                var path = rootWindow.activeVideoClip.sourceFile;
+                if (path.indexOf(":/") !== -1 || path.indexOf("qrc:/") !== -1) {
+                    return path;
+                }
+                if (path.startsWith("file:///")) {
+                    return path;
+                }
+                return "file:///" + path;
+            }
+            return "";
+        }
+        
+        onStatusChanged: {
+            if (status === MediaPlayer.LoadedMedia) {
+                if (rootWindow.activeVideoClip) {
+                    var seekPosMs = (timelineManager.currentPlayheadTime - rootWindow.activeVideoClip.startTime) / 1000;
+                    position = Math.max(0, seekPosMs);
+                }
+            }
+        }
+    }
+
+    Connections {
+        target: audioEngine
+        function onIsPlayingChanged() {
+            if (audioEngine.isPlaying) {
+                if (rootWindow.activeVideoClip) {
+                    var seekPosMs = (timelineManager.currentPlayheadTime - rootWindow.activeVideoClip.startTime) / 1000;
+                    videoPlayer.position = Math.max(0, seekPosMs);
+                }
+                videoPlayer.play();
+            } else {
+                videoPlayer.pause();
+                if (rootWindow.activeVideoClip) {
+                    var seekPosMs = (timelineManager.currentPlayheadTime - rootWindow.activeVideoClip.startTime) / 1000;
+                    videoPlayer.position = Math.max(0, seekPosMs);
+                }
+            }
+        }
+    }
+
+    Connections {
+        target: timelineManager
+        function onCurrentPlayheadTimeChanged() {
+            if (!audioEngine.isPlaying && rootWindow.activeVideoClip) {
+                var seekPosMs = (timelineManager.currentPlayheadTime - rootWindow.activeVideoClip.startTime) / 1000;
+                videoPlayer.position = Math.max(0, seekPosMs);
+            }
+        }
+    }
+
+
 
     // Helper function to register media files in the Media Library browser from outer drag-and-drops
     function importMediaFile(filename, path, type, autoPut) {
@@ -487,6 +591,13 @@ ApplicationWindow {
                     border.width: 1
                     SplitView.fillWidth: true
 
+                    VideoOutput {
+                        id: videoOutput
+                        anchors.fill: parent
+                        visible: rootWindow.activeVideoClip !== null
+                        fillMode: VideoOutput.PreserveAspectFit
+                    }
+
                     // Animated Live Audio Visualizer
                     Timer {
                         id: visualizerTimer
@@ -499,7 +610,7 @@ ApplicationWindow {
                     Canvas {
                         id: visualizerCanvas
                         anchors.fill: parent
-                        opacity: audioEngine.isPlaying ? 0.35 : 0.08
+                        opacity: (rootWindow.activeVideoClip !== null) ? 0.0 : (audioEngine.isPlaying ? 0.35 : 0.08)
                         Behavior on opacity { NumberAnimation { duration: 500 } }
                         
                         property double timeVar: 0.0
@@ -720,10 +831,145 @@ ApplicationWindow {
             if (timelineManager.saveProject(path)) {
                 currentProjectPath = path;
                 saveStatusText.text = "Project Saved!";
+                if (closeRequested) {
+                    Qt.quit();
+                }
             } else {
                 saveStatusText.text = "Save Failed";
+                closeRequested = false;
             }
             saveTextAnim.start();
+        }
+        onRejected: {
+            closeRequested = false;
+        }
+    }
+
+    Dialog {
+        id: unsavedChangesDialog
+        title: "Unsaved Changes"
+        modal: true
+        anchors.centerIn: parent
+        width: 400
+        standardButtons: Dialog.NoButton
+
+        background: Rectangle {
+            color: rootWindow.colorBgPanel
+            border.color: rootWindow.colorAccentViolet
+            border.width: 2
+            radius: 8
+        }
+
+        header: Rectangle {
+            color: rootWindow.colorBgCard
+            height: 40
+            width: parent.width
+            radius: 8
+            
+            Label {
+                anchors.left: parent.left
+                anchors.leftMargin: 15
+                anchors.verticalCenter: parent.verticalCenter
+                text: "UNSAVED CHANGES"
+                font.bold: true
+                font.pixelSize: 12
+                color: rootWindow.colorAccentViolet
+            }
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 15
+            anchors.margins: 15
+
+            Label {
+                text: "You have unsaved changes in your project. Do you want to save them before closing?"
+                color: rootWindow.colorTextPrimary
+                font.pixelSize: 12
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            RowLayout {
+                Layout.alignment: Qt.AlignRight
+                spacing: 10
+
+                Button {
+                    id: btnSaveUnsaved
+                    text: "SAVE"
+                    implicitWidth: 80
+                    implicitHeight: 28
+                    onClicked: {
+                        unsavedChangesDialog.close();
+                        if (currentProjectPath !== "") {
+                            if (timelineManager.saveProject(currentProjectPath)) {
+                                Qt.quit();
+                            }
+                        } else {
+                            saveFileDialog.open();
+                        }
+                    }
+                    background: Rectangle {
+                        color: btnSaveUnsaved.hovered ? rootWindow.colorAccentGreen : "#00A354"
+                        radius: 4
+                    }
+                    contentItem: Text {
+                        text: btnSaveUnsaved.text
+                        font.bold: true
+                        font.pixelSize: 10
+                        color: "#000"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+
+                Button {
+                    id: btnDiscardUnsaved
+                    text: "DON'T SAVE"
+                    implicitWidth: 90
+                    implicitHeight: 28
+                    onClicked: {
+                        unsavedChangesDialog.close();
+                        timelineManager.setDirty(false);
+                        Qt.quit();
+                    }
+                    background: Rectangle {
+                        color: btnDiscardUnsaved.hovered ? "#EF5350" : "#C62828"
+                        radius: 4
+                    }
+                    contentItem: Text {
+                        text: btnDiscardUnsaved.text
+                        font.bold: true
+                        font.pixelSize: 10
+                        color: "#FFF"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+
+                Button {
+                    id: btnCancelUnsaved
+                    text: "CANCEL"
+                    implicitWidth: 80
+                    implicitHeight: 28
+                    onClicked: {
+                        unsavedChangesDialog.close();
+                        closeRequested = false;
+                    }
+                    background: Rectangle {
+                        color: btnCancelUnsaved.hovered ? "#3E3E4D" : "#2C2C35"
+                        radius: 4
+                        border.color: rootWindow.colorBorder
+                    }
+                    contentItem: Text {
+                        text: btnCancelUnsaved.text
+                        font.bold: true
+                        font.pixelSize: 10
+                        color: rootWindow.colorTextSecondary
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+            }
         }
     }
 

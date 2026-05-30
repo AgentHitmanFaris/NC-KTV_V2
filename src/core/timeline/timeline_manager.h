@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QString>
 #include <QMap>
+#include <QVariantList>
 #include "track.h"
 #include "models/track_list_model.h"
 #include "models/clip_list_model.h"
@@ -11,6 +12,9 @@ namespace ncktv {
 
 class TimelineManager : public QObject {
     Q_OBJECT
+
+    Q_PROPERTY(QVariantList mediaList READ mediaList WRITE setMediaList NOTIFY mediaListChanged)
+    Q_PROPERTY(bool isDirty READ isDirty WRITE setIsDirty NOTIFY isDirtyChanged)
 
     Q_PROPERTY(qint64 currentPlayheadTime READ currentPlayheadTime WRITE setCurrentPlayheadTime NOTIFY currentPlayheadTimeChanged)
     Q_PROPERTY(qint64 totalDuration READ totalDuration WRITE setTotalDuration NOTIFY totalDurationChanged)
@@ -51,6 +55,13 @@ public:
     [[nodiscard]] QString renderStatusText() const { return m_renderStatusText; }
 
     // Getters and Setters
+    [[nodiscard]] QVariantList mediaList() const { return m_mediaList; }
+    void setMediaList(const QVariantList& list);
+
+    [[nodiscard]] bool isDirty() const { return m_isDirty; }
+    void setIsDirty(bool dirty);
+    Q_INVOKABLE void setDirty(bool dirty = true) { setIsDirty(dirty); }
+
     [[nodiscard]] qint64 currentPlayheadTime() const { return m_currentPlayheadTime; }
     void setCurrentPlayheadTime(qint64 timeMicroseconds);
 
@@ -110,6 +121,8 @@ signals:
     void modelPathChanged();
     void modelsDirPathChanged();
     void discoveredModelsChanged();
+    void mediaListChanged();
+    void isDirtyChanged();
     void mediaSeparationCompleted(const QString& vocalsPath, const QString& instPath);
 
 private slots:
@@ -145,6 +158,8 @@ private:
     QString m_modelsDirPath;
     QStringList m_discoveredModels;
     QStringList m_discoveredModelPaths;
+    QVariantList m_mediaList;
+    bool m_isDirty = false;
 };
 
 } // namespace ncktv

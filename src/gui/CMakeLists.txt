@@ -53,6 +53,7 @@ target_link_libraries(NC-KTV_V2
         Qt6::Qml
         Qt6::Widgets
         Qt6::QuickControls2
+        Qt6::Multimedia
 )
 
 # ─── Post-Build DLL Deployments ───────────────────────────────────────────────

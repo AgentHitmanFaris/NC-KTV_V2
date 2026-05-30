@@ -189,6 +189,7 @@ Rectangle {
 
             // Write change back to C++ model (triggers track update)
             clipData.startTime = Math.round(targetStartTimeUs);
+            timelineManager.setDirty();
             
             // Restore coordinate binding to sync future updates automatically
             clipItemRoot.x = Qt.binding(function() { 
@@ -266,6 +267,7 @@ Rectangle {
                 // Write back to C++ once
                 clipData.startTime = Math.round(targetStartTimeUs);
                 clipData.duration = Math.round(targetDurationUs);
+                timelineManager.setDirty();
                 
                 // Restore coordinate bindings to ensure they sync automatically
                 clipItemRoot.x = Qt.binding(function() { 
@@ -338,6 +340,7 @@ Rectangle {
                 
                 // Write back to C++ once
                 clipData.duration = Math.round(targetDurationUs);
+                timelineManager.setDirty();
                 
                 // Restore coordinate binding to sync future updates automatically
                 clipItemRoot.width = Qt.binding(function() { 

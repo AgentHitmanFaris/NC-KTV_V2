@@ -231,6 +231,7 @@ Rectangle {
                             onTextEdited: {
                                 if (selectedClip) {
                                     selectedClip.lyricText = text;
+                                    timelineManager.setDirty(true);
                                 }
                             }
                         }
@@ -315,6 +316,7 @@ Rectangle {
                                             onClicked: {
                                                 var newStart = Math.max(0, modelData.relativeStart - 50000); // shift 50ms earlier
                                                 selectedClip.updateSyllable(index, newStart, modelData.duration);
+                                                timelineManager.setDirty(true);
                                             }
                                             background: Rectangle { color: "#222"; radius: 2 }
                                             contentItem: Text { text: "-50ms"; font.pixelSize: 7; color: "#F0F0F5"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
@@ -326,6 +328,7 @@ Rectangle {
                                             onClicked: {
                                                 var newStart = modelData.relativeStart + 50000; // shift 50ms later
                                                 selectedClip.updateSyllable(index, newStart, modelData.duration);
+                                                timelineManager.setDirty(true);
                                             }
                                             background: Rectangle { color: "#222"; radius: 2 }
                                             contentItem: Text { text: "+50ms"; font.pixelSize: 7; color: "#F0F0F5"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
@@ -351,6 +354,7 @@ Rectangle {
                                             onClicked: {
                                                 var newDur = Math.max(100000, modelData.duration - 50000); // decrease 50ms
                                                 selectedClip.updateSyllable(index, modelData.relativeStart, newDur);
+                                                timelineManager.setDirty(true);
                                             }
                                             background: Rectangle { color: "#222"; radius: 2 }
                                             contentItem: Text { text: "-50ms"; font.pixelSize: 7; color: "#F0F0F5"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
@@ -362,6 +366,7 @@ Rectangle {
                                             onClicked: {
                                                 var newDur = modelData.duration + 50000; // increase 50ms
                                                 selectedClip.updateSyllable(index, modelData.relativeStart, newDur);
+                                                timelineManager.setDirty(true);
                                             }
                                             background: Rectangle { color: "#222"; radius: 2 }
                                             contentItem: Text { text: "+50ms"; font.pixelSize: 7; color: "#F0F0F5"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
@@ -865,6 +870,7 @@ Rectangle {
                             }
                             onTextEdited: {
                                 model.clipObject.lyricText = text;
+                                timelineManager.setDirty(true);
                             }
                         }
                         
@@ -879,6 +885,7 @@ Rectangle {
                                 onClicked: {
                                     var newStart = Math.max(0, model.clipStartTime - 100000);
                                     model.clipObject.moveTo(newStart);
+                                    timelineManager.setDirty(true);
                                 }
                                 background: Rectangle { color: "#2A2A35"; radius: 2 }
                                 contentItem: Text { text: "-.1s"; font.pixelSize: 8; color: "#FFF"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
@@ -891,6 +898,7 @@ Rectangle {
                                 onClicked: {
                                     var newStart = model.clipStartTime + 100000;
                                     model.clipObject.moveTo(newStart);
+                                    timelineManager.setDirty(true);
                                 }
                                 background: Rectangle { color: "#2A2A35"; radius: 2 }
                                 contentItem: Text { text: "+.1s"; font.pixelSize: 8; color: "#FFF"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
@@ -920,6 +928,7 @@ Rectangle {
                                     selectedClip = null;
                                 }
                                 selectedTrack.removeClip(model.clipId);
+                                timelineManager.setDirty(true);
                             }
                         }
                     }
