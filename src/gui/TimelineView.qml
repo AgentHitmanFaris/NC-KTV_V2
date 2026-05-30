@@ -407,6 +407,111 @@ Rectangle {
                     }
                 }
 
+                DropArea {
+                    id: timelineDropArea
+                    anchors.fill: tracksColumn
+                    keys: ["text/uri-list"]
+                    
+                    onEntered: (drag) => {
+                        if (drag.hasUrls) {
+                            drag.acceptProposedAction();
+                        }
+                    }
+                    
+                    onDropped: (drop) => {
+                        if (drop.hasUrls) {
+                            drop.acceptProposedAction();
+                            
+                            var trackHeight = timelineRoot.compactTracks ? 60 : 90;
+                            var spacing = 1;
+                            var trackIdx = Math.floor(drop.y / (trackHeight + spacing));
+                            
+                            var trackCount = timelineManager.trackListModel.rowCount();
+                            if (trackIdx < 0) trackIdx = 0;
+                            if (trackIdx >= trackCount) trackIdx = trackCount - 1;
+                            
+                            var dropTimeUs = Math.max(0, xToTime(drop.x - 180));
+                            
+                            for (var i = 0; i < drop.urls.length; ++i) {
+                                var url = drop.urls[i].toString();
+                                if (url.startsWith("file:///")) {
+                                    url = url.substring(8);
+                                }
+                                if (url.charAt(0) === '/' && url.charAt(2) === ':') {
+                                    url = url.substring(1);
+                                }
+                                url = decodeURIComponent(url);
+                                
+                                var filename = url.substring(url.lastIndexOf('/') + 1);
+                                var lastDotIdx = filename.lastIndexOf('.');
+                                var extension = lastDotIdx !== -1 ? filename.substring(lastDotIdx + 1).toLowerCase() : "";
+                                
+                                var clipType = -1;
+                                var trackTypeName = "";
+                                if (extension === "srt" || extension === "lrc") {
+                                    clipType = 2;
+                                    trackTypeName = "Lyrics";
+                                } else if (extension === "mp4" || extension === "mov" || extension === "avi" || extension === "mkv") {
+                                    clipType = 1;
+                                    trackTypeName = "Video";
+                                } else if (extension === "wav" || extension === "mp3" || extension === "m4a" || extension === "ogg" || extension === "flac") {
+                                    clipType = 0;
+                                    trackTypeName = "Audio";
+                                }
+                                
+                                if (clipType !== -1) {
+                                    var targetTrack = null;
+                                    if (trackIdx >= 0 && trackIdx < trackCount) {
+                                        var t = timelineManager.trackListModel.tracks()[trackIdx];
+                                        if (t && t.trackType === clipType) {
+                                            targetTrack = t;
+                                        }
+                                    }
+                                    
+                                    if (!targetTrack) {
+                                        for (var j = 0; j < trackCount; ++j) {
+                                            var t = timelineManager.trackListModel.tracks()[j];
+                                            if (t && t.trackType === clipType) {
+                                                targetTrack = t;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    
+                                    var finalTrackId = "";
+                                    if (targetTrack) {
+                                        finalTrackId = targetTrack.trackId;
+                                    } else {
+                                        var newName = trackTypeName + " " + (trackCount + 1);
+                                        finalTrackId = timelineManager.addTrack(clipType, newName);
+                                    }
+                                    
+                                    if (finalTrackId !== "") {
+                                        if (clipType === 2) {
+                                            timelineManager.importLyricsFromFile(finalTrackId, url);
+                                        } else {
+                                            timelineManager.addClipToTrack(finalTrackId, "", clipType, dropTimeUs, 0, url);
+                                        }
+                                        rootWindow.importMediaFile(filename, url, trackTypeName, false);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                Rectangle {
+                    anchors.fill: tracksColumn
+                    color: "transparent"
+                    border.color: rootWindow.colorAccentViolet
+                    border.width: 2
+                    opacity: timelineDropArea.containsDrag ? 0.8 : 0.0
+                    z: 10
+                    visible: opacity > 0
+                    Behavior on opacity { NumberAnimation { duration: 150 } }
+                }
+
+
                 // Visual Playhead Line Indicator with smooth glide rendering
                 Rectangle {
                     id: playheadLine

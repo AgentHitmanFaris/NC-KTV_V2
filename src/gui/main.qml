@@ -24,6 +24,14 @@ ApplicationWindow {
     property color colorTextSecondary: "#8A8A9E"
     property color colorGlassGlow: "#1F1A30"
 
+    // Active project path tracking
+    property string currentProjectPath: ""
+
+    // Helper function to register media files in the Media Library browser from outer drag-and-drops
+    function importMediaFile(filename, path, type, autoPut) {
+        mediaBrowser.addMediaFile(filename, path, type, autoPut);
+    }
+
     // Global Lyric Sweep Progress calculator for syllable sweeps
     function calculateClipSweepProgress(clipData, currentPlayheadTimeUs) {
         if (!clipData || clipData.clipType !== 2 || clipData.syllables.length === 0) {
@@ -89,22 +97,19 @@ ApplicationWindow {
     Shortcut {
         sequence: "Ctrl+S"
         onActivated: {
-            var filePath = "D:/Document/NC-Project/NC-KTV/NC-KTV_V2/project.nctv";
-            timelineManager.saveProject(filePath);
-            saveStatusText.text = "Project Saved!";
-            saveTextAnim.start();
+            if (currentProjectPath !== "") {
+                timelineManager.saveProject(currentProjectPath);
+                saveStatusText.text = "Project Saved!";
+                saveTextAnim.start();
+            } else {
+                saveFileDialog.open();
+            }
         }
     }
     Shortcut {
         sequence: "Ctrl+O"
         onActivated: {
-            var filePath = "D:/Document/NC-Project/NC-KTV/NC-KTV_V2/project.nctv";
-            if (timelineManager.loadProject(filePath)) {
-                saveStatusText.text = "Project Loaded!";
-            } else {
-                saveStatusText.text = "Load Failed (no saved project)";
-            }
-            saveTextAnim.start();
+            openFileDialog.open();
         }
     }
     Shortcut {
@@ -375,11 +380,13 @@ ApplicationWindow {
                         id: btnSave
                         text: "Save Project"
                         onClicked: {
-                            // Saving nctv project format
-                            var filePath = "D:/Document/NC-Project/NC-KTV/NC-KTV_V2/project.nctv";
-                            timelineManager.saveProject(filePath);
-                            saveStatusText.text = "Project Saved!";
-                            saveTextAnim.start();
+                            if (currentProjectPath !== "") {
+                                timelineManager.saveProject(currentProjectPath);
+                                saveStatusText.text = "Project Saved!";
+                                saveTextAnim.start();
+                            } else {
+                                saveFileDialog.open();
+                            }
                         }
                         contentItem: Text {
                             text: btnSave.text
@@ -400,13 +407,7 @@ ApplicationWindow {
                         id: btnLoad
                         text: "Load Project"
                         onClicked: {
-                            var filePath = "D:/Document/NC-Project/NC-KTV/NC-KTV_V2/project.nctv";
-                            if (timelineManager.loadProject(filePath)) {
-                                saveStatusText.text = "Project Loaded!";
-                            } else {
-                                saveStatusText.text = "Load Failed (no saved project)";
-                            }
-                            saveTextAnim.start();
+                            openFileDialog.open();
                         }
                         contentItem: Text {
                             text: btnLoad.text
@@ -696,6 +697,58 @@ ApplicationWindow {
 
     ExportDialog {
         id: exportDialog
+    }
+
+    FileDialog {
+        id: saveFileDialog
+        title: "Save Project As"
+        fileMode: FileDialog.SaveFile
+        nameFilters: ["NC-KTV Project files (*.nctv)"]
+        defaultSuffix: "nctv"
+        onAccepted: {
+            var path = selectedFile.toString();
+            if (path.startsWith("file:///")) {
+                path = path.substring(8);
+            }
+            if (path.charAt(0) === '/' && path.charAt(2) === ':') {
+                path = path.substring(1);
+            }
+            path = decodeURIComponent(path);
+            if (!path.endsWith(".nctv")) {
+                path += ".nctv";
+            }
+            if (timelineManager.saveProject(path)) {
+                currentProjectPath = path;
+                saveStatusText.text = "Project Saved!";
+            } else {
+                saveStatusText.text = "Save Failed";
+            }
+            saveTextAnim.start();
+        }
+    }
+
+    FileDialog {
+        id: openFileDialog
+        title: "Open Project"
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["NC-KTV Project files (*.nctv)"]
+        onAccepted: {
+            var path = selectedFile.toString();
+            if (path.startsWith("file:///")) {
+                path = path.substring(8);
+            }
+            if (path.charAt(0) === '/' && path.charAt(2) === ':') {
+                path = path.substring(1);
+            }
+            path = decodeURIComponent(path);
+            if (timelineManager.loadProject(path)) {
+                currentProjectPath = path;
+                saveStatusText.text = "Project Loaded!";
+            } else {
+                saveStatusText.text = "Load Failed";
+            }
+            saveTextAnim.start();
+        }
     }
 
     FileDialog {

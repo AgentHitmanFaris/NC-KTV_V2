@@ -10,6 +10,15 @@ Rectangle {
 
     property var selectedClip: null // C++ Clip* pointer
     property var selectedTrack: null // C++ Track* pointer
+    property int lyricsViewMode: 0 // 0 = Track list sheet, 1 = Clip details & syllables
+
+    onSelectedClipChanged: {
+        if (selectedClip !== null) {
+            lyricsViewMode = 1;
+        } else {
+            lyricsViewMode = 0;
+        }
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -23,9 +32,59 @@ Rectangle {
             color: rootWindow.colorTextPrimary
         }
 
+        // Tab switches for captions editor
+        RowLayout {
+            id: lyricsTabHeader
+            Layout.fillWidth: true
+            visible: selectedTrack !== null && selectedTrack.trackType === 2 && selectedClip !== null
+            spacing: 8
+            
+            Button {
+                id: tabBtnTrack
+                text: "Lyrics Sheet"
+                Layout.fillWidth: true
+                implicitHeight: 26
+                onClicked: propsPanelRoot.lyricsViewMode = 0
+                background: Rectangle {
+                    color: propsPanelRoot.lyricsViewMode === 0 ? "#2D264A" : "#16161D"
+                    radius: 3
+                    border.color: propsPanelRoot.lyricsViewMode === 0 ? rootWindow.colorAccentViolet : rootWindow.colorBorder
+                }
+                contentItem: Text {
+                    text: tabBtnTrack.text
+                    font.pixelSize: 10
+                    font.bold: true
+                    color: propsPanelRoot.lyricsViewMode === 0 ? "#FFF" : rootWindow.colorTextSecondary
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+            
+            Button {
+                id: tabBtnClip
+                text: "Syllable Tuner"
+                Layout.fillWidth: true
+                implicitHeight: 26
+                onClicked: propsPanelRoot.lyricsViewMode = 1
+                background: Rectangle {
+                    color: propsPanelRoot.lyricsViewMode === 1 ? "#2D264A" : "#16161D"
+                    radius: 3
+                    border.color: propsPanelRoot.lyricsViewMode === 1 ? rootWindow.colorAccentViolet : rootWindow.colorBorder
+                }
+                contentItem: Text {
+                    text: tabBtnClip.text
+                    font.pixelSize: 10
+                    font.bold: true
+                    color: propsPanelRoot.lyricsViewMode === 1 ? "#FFF" : rootWindow.colorTextSecondary
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+        }
+
         // State 1: No Clip selected
         Rectangle {
-            visible: propsPanelRoot.selectedClip === null
+            visible: propsPanelRoot.selectedClip === null && (propsPanelRoot.selectedTrack === null || propsPanelRoot.selectedTrack.trackType !== 2)
             Layout.fillWidth: true
             Layout.fillHeight: true
             color: "transparent"
@@ -50,7 +109,7 @@ Rectangle {
 
         // State 2: Clip details active
         ScrollView {
-            visible: propsPanelRoot.selectedClip !== null
+            visible: propsPanelRoot.selectedClip !== null && (propsPanelRoot.selectedTrack === null || propsPanelRoot.selectedTrack.trackType !== 2 || propsPanelRoot.lyricsViewMode === 1)
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
@@ -631,6 +690,237 @@ Rectangle {
                             color: "#EF5350"
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
+                        }
+                    }
+                }
+            }
+        }
+
+        // State 3: Track Lyrics Editor (active when a lyrics track is selected and we are in Track list sheet view mode)
+        ColumnLayout {
+            id: trackLyricsEditor
+            visible: selectedTrack !== null && selectedTrack.trackType === 2 && (propsPanelRoot.selectedClip === null || propsPanelRoot.lyricsViewMode === 0)
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: 12
+
+            // Top actions bar for the lyrics editor
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+                
+                Label {
+                    text: "LYRICS SHEET EDITOR"
+                    font.bold: true
+                    font.pixelSize: 11
+                    color: rootWindow.colorTextPrimary
+                    Layout.fillWidth: true
+                }
+                
+                // Add caption line button
+                Button {
+                    id: btnAddCaptionLine
+                    text: "+ LINE"
+                    implicitWidth: 60
+                    implicitHeight: 22
+                    onClicked: {
+                        var playheadTime = timelineManager.currentPlayheadTime;
+                        var success = timelineManager.addClipToTrack(selectedTrack.trackId, "", 2, playheadTime, 3000000, "", "New subtitle line");
+                    }
+                    background: Rectangle {
+                        color: btnAddCaptionLine.hovered ? rootWindow.colorAccentGreen : "#1F3320"
+                        radius: 3
+                        border.color: rootWindow.colorAccentGreen
+                    }
+                    contentItem: Text {
+                        text: btnAddCaptionLine.text
+                        font.pixelSize: 9
+                        font.bold: true
+                        color: rootWindow.colorAccentGreen
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+                
+                // Clear all captions button
+                Button {
+                    id: btnClearCaptions
+                    text: "CLEAR"
+                    implicitWidth: 60
+                    implicitHeight: 22
+                    onClicked: {
+                        var clips = selectedTrack.clips();
+                        for (var i = clips.length - 1; i >= 0; --i) {
+                            selectedTrack.removeClip(clips[i].clipId);
+                        }
+                    }
+                    background: Rectangle {
+                        color: btnClearCaptions.hovered ? "#C62828" : "#331F1F"
+                        radius: 3
+                        border.color: "#FF5252"
+                    }
+                    contentItem: Text {
+                        text: btnClearCaptions.text
+                        font.pixelSize: 9
+                        font.bold: true
+                        color: "#FF5252"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+            }
+            
+            // Search filter input
+            TextField {
+                id: lyricSearchField
+                Layout.fillWidth: true
+                placeholderText: "Search lyrics..."
+                color: rootWindow.colorTextPrimary
+                font.pixelSize: 11
+                background: Rectangle {
+                    color: "#16161D"
+                    border.color: rootWindow.colorBorder
+                    radius: 4
+                }
+                
+                // Reset search text on track change
+                Connections {
+                    target: propsPanelRoot
+                    function onSelectedTrackChanged() {
+                        lyricSearchField.text = "";
+                    }
+                }
+            }
+
+            // Subtitles List View
+            ListView {
+                id: captionListView
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                spacing: 6
+                
+                model: selectedTrack ? timelineManager.getClipModelForTrack(selectedTrack.trackId) : null
+                
+                delegate: Rectangle {
+                    id: captionRow
+                    width: captionListView.width
+                    height: visible ? 44 : 0
+                    color: (selectedClip === model.clipObject) ? "#2D264A" : "#1B1B22"
+                    border.color: (selectedClip === model.clipObject) ? rootWindow.colorAccentViolet : rootWindow.colorBorder
+                    border.width: 1
+                    radius: 4
+                    
+                    visible: {
+                        if (lyricSearchField.text.trim() === "") return true;
+                        var text = model.clipLyricText ? model.clipLyricText.toLowerCase() : "";
+                        return text.includes(lyricSearchField.text.toLowerCase());
+                    }
+                    
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: 6
+                        spacing: 8
+                        
+                        // Timecode Nav Button
+                        Button {
+                            id: btnTimeNav
+                            text: timelineManager.formatTimecode(model.clipStartTime)
+                            implicitWidth: 80
+                            implicitHeight: 24
+                            background: Rectangle {
+                                color: btnTimeNav.hovered ? "#333" : "#0D0D11"
+                                radius: 3
+                                border.color: "#3F51B5"
+                            }
+                            contentItem: Text {
+                                text: btnTimeNav.text
+                                font.pixelSize: 9
+                                color: rootWindow.colorAccentGreen
+                                font.family: "Courier New"
+                                font.bold: true
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            onClicked: {
+                                timelineManager.currentPlayheadTime = model.clipStartTime;
+                                selectedClip = model.clipObject;
+                            }
+                        }
+                        
+                        // Subtitle text editor field
+                        TextField {
+                            id: captionTxtField
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            text: model.clipLyricText
+                            color: rootWindow.colorTextPrimary
+                            font.pixelSize: 11
+                            placeholderText: "(empty)"
+                            background: Rectangle {
+                                color: captionTxtField.activeFocus ? "#0D0D11" : "transparent"
+                                border.color: captionTxtField.activeFocus ? rootWindow.colorAccentViolet : "transparent"
+                                border.width: 1
+                                radius: 3
+                            }
+                            onTextEdited: {
+                                model.clipObject.lyricText = text;
+                            }
+                        }
+                        
+                        // Nudge buttons layout
+                        RowLayout {
+                            spacing: 2
+                            
+                            Button {
+                                text: "<"
+                                implicitWidth: 20
+                                implicitHeight: 24
+                                onClicked: {
+                                    var newStart = Math.max(0, model.clipStartTime - 100000);
+                                    model.clipObject.moveTo(newStart);
+                                }
+                                background: Rectangle { color: "#2A2A35"; radius: 2 }
+                                contentItem: Text { text: "-.1s"; font.pixelSize: 8; color: "#FFF"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                            }
+                            
+                            Button {
+                                text: ">"
+                                implicitWidth: 20
+                                implicitHeight: 24
+                                onClicked: {
+                                    var newStart = model.clipStartTime + 100000;
+                                    model.clipObject.moveTo(newStart);
+                                }
+                                background: Rectangle { color: "#2A2A35"; radius: 2 }
+                                contentItem: Text { text: "+.1s"; font.pixelSize: 8; color: "#FFF"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                            }
+                        }
+                        
+                        // Delete Button
+                        Button {
+                            id: btnDeleteCap
+                            text: "✕"
+                            implicitWidth: 22
+                            implicitHeight: 24
+                            background: Rectangle {
+                                color: btnDeleteCap.hovered ? "#C62828" : "transparent"
+                                radius: 3
+                            }
+                            contentItem: Text {
+                                text: btnDeleteCap.text
+                                font.pixelSize: 11
+                                font.bold: true
+                                color: "#EF5350"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            onClicked: {
+                                if (selectedClip === model.clipObject) {
+                                    selectedClip = null;
+                                }
+                                selectedTrack.removeClip(model.clipId);
+                            }
                         }
                     }
                 }
