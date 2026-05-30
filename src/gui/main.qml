@@ -56,6 +56,7 @@ ApplicationWindow {
     }
 
     onActiveVideoClipChanged: {
+        console.log("[VIDEO PREVIEW] Active video clip changed: " + (activeVideoClip ? activeVideoClip.clipId : "None") + ", source: " + (activeVideoClip ? activeVideoClip.sourceFile : "None"));
         if (activeVideoClip) {
             var seekPosMs = (timelineManager.currentPlayheadTime - activeVideoClip.startTime) / 1000;
             videoPlayer.position = Math.max(0, seekPosMs);
@@ -85,17 +86,27 @@ ApplicationWindow {
                 if (path.startsWith("file:///")) {
                     return path;
                 }
-                return "file:///" + path;
+                // Use encodeURI to safely format spaces, quotes, and unicode characters for QUrl
+                var resolvedUrl = "file:///" + encodeURI(path);
+                console.log("[VIDEO PREVIEW] Loading media source URL: " + resolvedUrl);
+                return resolvedUrl;
             }
             return "";
         }
         
         onMediaStatusChanged: {
+            console.log("[VIDEO PREVIEW] Media status changed: " + mediaStatus + " (NoMedia=0, Loading=1, Loaded=2, EndOfMedia=6, Invalid=8)");
             if (mediaStatus === MediaPlayer.LoadedMedia) {
                 if (rootWindow.activeVideoClip) {
                     var seekPosMs = (timelineManager.currentPlayheadTime - rootWindow.activeVideoClip.startTime) / 1000;
                     position = Math.max(0, seekPosMs);
                 }
+            }
+        }
+
+        onErrorChanged: {
+            if (error !== MediaPlayer.NoError) {
+                console.log("[VIDEO PREVIEW] MediaPlayer Error (" + error + "): " + errorString);
             }
         }
     }
