@@ -100,6 +100,17 @@ ApplicationWindow {
         }
     }
 
+    Timer {
+        id: scrubSeekTimer
+        interval: 50 // Throttle seeks to at most 20 per second
+        repeat: false
+        running: false
+        property real pendingPositionMs: 0
+        onTriggered: {
+            videoPlayer.position = pendingPositionMs;
+        }
+    }
+
     Connections {
         target: audioEngine
         function onIsPlayingChanged() {
@@ -124,7 +135,11 @@ ApplicationWindow {
         function onCurrentPlayheadTimeChanged() {
             if (!audioEngine.isPlaying && rootWindow.activeVideoClip) {
                 var seekPosMs = (timelineManager.currentPlayheadTime - rootWindow.activeVideoClip.startTime) / 1000;
-                videoPlayer.position = Math.max(0, seekPosMs);
+                scrubSeekTimer.pendingPositionMs = Math.max(0, seekPosMs);
+                if (!scrubSeekTimer.running) {
+                    videoPlayer.position = scrubSeekTimer.pendingPositionMs;
+                    scrubSeekTimer.start();
+                }
             }
         }
     }
