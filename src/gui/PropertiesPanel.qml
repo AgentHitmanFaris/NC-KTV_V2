@@ -11,9 +11,22 @@ Rectangle {
     property var selectedClip: null // C++ Clip* pointer
     property var selectedTrack: null // C++ Track* pointer
     property int lyricsViewMode: 0 // 0 = Track list sheet, 1 = Clip details & syllables
-    property var timelineManager: null
     property real sylZoomFactor: 1.0
     property int selectedSylIdx: -1
+
+    // Centrally computed active syllable index — avoids N per-delegate binding evaluations per playhead tick
+    property int activeSylIdx: {
+        if (!selectedClip || selectedClip.clipType !== 2) return -1;
+        var playhead = timelineManager.currentPlayheadTime;
+        if (playhead < selectedClip.startTime || playhead >= selectedClip.endTime) return -1;
+        var syls = selectedClip.syllables;
+        for (var i = 0; i < syls.length; ++i) {
+            var absStart = selectedClip.startTime + syls[i].relativeStart;
+            var absEnd = absStart + syls[i].duration;
+            if (playhead >= absStart && playhead < absEnd) return i;
+        }
+        return -1;
+    }
 
 
     onSelectedClipChanged: {
@@ -458,7 +471,7 @@ Rectangle {
 
                 RowLayout {
                     spacing: 10
-                    Label { text: "Start:"; font.pixelSize: 15; color: rootWindow.colorTextPrimary; Layout.preferredWidth: 60 }
+                    Label { text: "Start:"; font.pixelSize: 15; color: rootWindow.colorTextPrimary; Layout.preferredWidth: 80 }
                     Label {
                         text: selectedClip ? timelineManager.formatTimecode(selectedClip.startTime) : "00:00:00:00"
                         font.pixelSize: 15
@@ -470,7 +483,7 @@ Rectangle {
 
                 RowLayout {
                     spacing: 10
-                    Label { text: "Duration:"; font.pixelSize: 15; color: rootWindow.colorTextPrimary; Layout.preferredWidth: 60 }
+                    Label { text: "Duration:"; font.pixelSize: 15; color: rootWindow.colorTextPrimary; Layout.preferredWidth: 80 }
                     Label {
                         text: selectedClip ? timelineManager.formatTimecode(selectedClip.duration) : "00:00:00:00"
                         font.pixelSize: 15
@@ -482,7 +495,7 @@ Rectangle {
 
                 RowLayout {
                     spacing: 10
-                    Label { text: "End:"; font.pixelSize: 15; color: rootWindow.colorTextPrimary; Layout.preferredWidth: 60 }
+                    Label { text: "End:"; font.pixelSize: 15; color: rootWindow.colorTextPrimary; Layout.preferredWidth: 80 }
                     Label {
                         text: selectedClip ? timelineManager.formatTimecode(selectedClip.endTime) : "00:00:00:00"
                         font.pixelSize: 15
@@ -661,13 +674,7 @@ Rectangle {
                                         height: parent.height
                                         width: Math.max(50.0, (modelData.duration / 1000000.0) * 180.0 * propsPanelRoot.sylZoomFactor)
                                         
-                                        property bool isActive: {
-                                            if (!selectedClip) return false;
-                                            var playhead = timelineManager.currentPlayheadTime;
-                                            var absStart = selectedClip.startTime + modelData.relativeStart;
-                                            var absEnd = absStart + modelData.duration;
-                                            return (playhead >= absStart && playhead < absEnd);
-                                        }
+                                        property bool isActive: propsPanelRoot.activeSylIdx === index
                                         property bool isSelected: propsPanelRoot.selectedSylIdx === index
 
                                         color: isActive ? "#2D1A4D" : (isSelected ? "#221C35" : "#14141A")
@@ -729,13 +736,7 @@ Rectangle {
                                 width: sylListView.width - 12
                                 height: 36
                                 
-                                property bool isActive: {
-                                    if (!selectedClip) return false;
-                                    var playhead = timelineManager.currentPlayheadTime;
-                                    var absStart = selectedClip.startTime + modelData.relativeStart;
-                                    var absEnd = absStart + modelData.duration;
-                                    return (playhead >= absStart && playhead < absEnd);
-                                }
+                                property bool isActive: propsPanelRoot.activeSylIdx === index
                                 property bool isSelected: propsPanelRoot.selectedSylIdx === index
 
                                 color: isActive ? "#2D1A4D" : (isSelected ? "#221C35" : "#16161D")
@@ -762,14 +763,13 @@ Rectangle {
                                         Layout.preferredWidth: 80
                                         elide: Text.ElideRight
                                     }
-                                    
-                                    // Offset display
+                                                                // Offset display
                                     Label {
                                         text: (modelData.relativeStart / 1000000.0).toFixed(2) + "s"
                                         font.pixelSize: 13
                                         color: rootWindow.colorAccentGreen
                                         font.family: "Courier New"
-                                        Layout.preferredWidth: 40
+                                        Layout.preferredWidth: 50
                                     }
                                     
                                     // Shift Start buttons
@@ -777,7 +777,7 @@ Rectangle {
                                         spacing: 2
                                         Button {
                                             text: "Start -"
-                                            implicitWidth: 38
+                                            implicitWidth: 40
                                             implicitHeight: 18
                                             onClicked: {
                                                 var newStart = Math.max(0, modelData.relativeStart - 50000); // shift 50ms earlier
@@ -789,7 +789,7 @@ Rectangle {
                                         }
                                         Button {
                                             text: "Start +"
-                                            implicitWidth: 38
+                                            implicitWidth: 40
                                             implicitHeight: 18
                                             onClicked: {
                                                 var newStart = modelData.relativeStart + 50000; // shift 50ms later
@@ -807,15 +807,15 @@ Rectangle {
                                         font.pixelSize: 13
                                         color: rootWindow.colorAccentGreen
                                         font.family: "Courier New"
-                                        Layout.preferredWidth: 40
+                                        Layout.preferredWidth: 50
                                     }
-
+ 
                                     // Duration Adjust buttons
                                     RowLayout {
                                         spacing: 2
                                         Button {
                                             text: "Dur -"
-                                            implicitWidth: 38
+                                            implicitWidth: 40
                                             implicitHeight: 18
                                             onClicked: {
                                                 var newDur = Math.max(100000, modelData.duration - 50000); // decrease 50ms
@@ -827,7 +827,7 @@ Rectangle {
                                         }
                                         Button {
                                             text: "Dur +"
-                                            implicitWidth: 38
+                                            implicitWidth: 40
                                             implicitHeight: 18
                                             onClicked: {
                                                 var newDur = modelData.duration + 50000; // increase 50ms
@@ -1302,7 +1302,7 @@ Rectangle {
                 clip: true
                 spacing: 6
                 
-                model: selectedTrack ? timelineManager.getClipModelForTrack(selectedTrack.trackId) : null
+                model: (selectedTrack && timelineManager) ? timelineManager.getClipModelForTrack(selectedTrack.trackId) : null
                 
                 delegate: Rectangle {
                     id: captionRow
@@ -1328,7 +1328,7 @@ Rectangle {
                         Button {
                             id: btnTimeNav
                             text: timelineManager.formatTimecode(model.clipStartTime)
-                            implicitWidth: 80
+                            implicitWidth: 92
                             implicitHeight: 24
                             background: Rectangle {
                                 color: btnTimeNav.hovered ? "#333" : "#0D0D11"
@@ -1377,7 +1377,7 @@ Rectangle {
                             
                             Button {
                                 text: "<"
-                                implicitWidth: 20
+                                implicitWidth: 38
                                 implicitHeight: 24
                                 onClicked: {
                                     var newStart = Math.max(0, model.clipStartTime - 100000);
@@ -1390,7 +1390,7 @@ Rectangle {
                             
                             Button {
                                 text: ">"
-                                implicitWidth: 20
+                                implicitWidth: 38
                                 implicitHeight: 24
                                 onClicked: {
                                     var newStart = model.clipStartTime + 100000;

@@ -36,7 +36,7 @@ Rectangle {
     }
     border.width: isSelected ? 2 : 1
 
-    Behavior on opacity { NumberAnimation { duration: 150 } }
+    Behavior on opacity { NumberAnimation { duration: 100 } }
 
     // Hover effect
     property bool hovered: false
@@ -57,7 +57,15 @@ Rectangle {
     }
 
     // Progressive Syllable-Level Karaoke Sweep for Lyric Tracks (clipType = 2)
-    property double sweepProgress: rootWindow.calculateClipSweepProgress(clipData, timelineManager.currentPlayheadTime)
+    // Only compute when the playhead is actually inside this clip's time range
+    property double sweepProgress: {
+        if (!clipData || clipData.clipType !== 2) return 0.0;
+        var t = timelineManager.currentPlayheadTime;
+        if (t < clipData.startTime || t >= clipData.endTime) {
+            return t >= clipData.endTime ? 1.0 : 0.0;
+        }
+        return rootWindow.calculateClipSweepProgress(clipData, t);
+    }
 
     // Clip label details and UI Layout
     Column {
@@ -137,17 +145,7 @@ Rectangle {
         }
     }
 
-    // Click to select clip
-    MouseArea {
-        anchors.fill: parent
-        drag.target: null // Handled manually below for snapping calculations
-        
-        onPressed: (mouse) => {
-            propertiesPanel.selectedClip = clipItemRoot.clipData;
-            propertiesPanel.selectedTrack = clipItemRoot.parentTrack;
-            mouse.accepted = true;
-        }
-    }
+    // Selection handled by dragArea onPressed below
 
     // Horizontal dragging with snap & collision checks (offloaded to QML's native drag target for 60fps performance)
     MouseArea {

@@ -12,6 +12,8 @@ Rectangle {
     // Zoom factor: width in pixels of 1 second (1,000,000 microseconds)
     property double zoomFactor: 120.0 
     property bool compactTracks: false
+    property int trackHeight: 90
+    onTrackHeightChanged: compactTracks = (trackHeight <= 60)
     
     // Snapping configuration
     property bool snappingEnabled: true
@@ -202,7 +204,13 @@ Rectangle {
                     text: timelineRoot.compactTracks ? "COMPACT LAYOUT" : "STANDARD LAYOUT"
                     implicitWidth: 110
                     implicitHeight: 22
-                    onClicked: timelineRoot.compactTracks = !timelineRoot.compactTracks
+                    onClicked: {
+                        if (timelineRoot.trackHeight <= 60) {
+                            timelineRoot.trackHeight = 90;
+                        } else {
+                            timelineRoot.trackHeight = 60;
+                        }
+                    }
                     background: Rectangle {
                         color: timelineRoot.compactTracks ? "#2D264A" : rootWindow.colorBgCard
                         radius: 3
@@ -215,6 +223,65 @@ Rectangle {
                         color: timelineRoot.compactTracks ? "#FFF" : rootWindow.colorTextSecondary
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
+                    }
+                }
+
+                // Timeline Height Zoom Controls
+                RowLayout {
+                    spacing: 4
+                    Label {
+                        text: "Height"
+                        color: rootWindow.colorTextSecondary
+                        font.pixelSize: 15
+                    }
+                    
+                    // Height Out Button
+                    Button {
+                        id: btnHeightOut
+                        text: "-"
+                        implicitWidth: 20
+                        implicitHeight: 20
+                        onClicked: timelineRoot.trackHeight = Math.max(40, timelineRoot.trackHeight - 10)
+                        background: Rectangle {
+                            color: btnHeightOut.hovered ? "#222" : "transparent"
+                            radius: 3
+                        }
+                        contentItem: Text {
+                            text: btnHeightOut.text
+                            font.pixelSize: 12
+                            color: "#FFF"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                    }
+
+                    Slider {
+                        id: heightSlider
+                        from: 40
+                        to: 200
+                        value: timelineRoot.trackHeight
+                        implicitWidth: 110
+                        onMoved: timelineRoot.trackHeight = value
+                    }
+
+                    // Height In Button
+                    Button {
+                        id: btnHeightIn
+                        text: "+"
+                        implicitWidth: 20
+                        implicitHeight: 20
+                        onClicked: timelineRoot.trackHeight = Math.min(200, timelineRoot.trackHeight + 10)
+                        background: Rectangle {
+                            color: btnHeightIn.hovered ? "#222" : "transparent"
+                            radius: 3
+                        }
+                        contentItem: Text {
+                            text: btnHeightIn.text
+                            font.pixelSize: 12
+                            color: "#FFF"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
                     }
                 }
 
@@ -288,6 +355,40 @@ Rectangle {
             ScrollBar.vertical.policy: ScrollBar.AsNeeded
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOn
 
+            WheelHandler {
+                id: altWheelHandler
+                acceptedModifiers: Qt.AltModifier
+                onWheel: (event) => {
+                    if (event.angleDelta.y > 0) {
+                        timelineRoot.zoomFactor = Math.min(500.0, timelineRoot.zoomFactor + 20.0);
+                    } else {
+                        timelineRoot.zoomFactor = Math.max(20.0, timelineRoot.zoomFactor - 20.0);
+                    }
+                }
+            }
+            WheelHandler {
+                id: ctrlWheelHandler
+                acceptedModifiers: Qt.ControlModifier
+                onWheel: (event) => {
+                    if (event.angleDelta.y > 0) {
+                        timelineRoot.trackHeight = Math.min(200, timelineRoot.trackHeight + 10);
+                    } else {
+                        timelineRoot.trackHeight = Math.max(40, timelineRoot.trackHeight - 10);
+                    }
+                }
+            }
+            WheelHandler {
+                id: shiftWheelHandler
+                acceptedModifiers: Qt.ShiftModifier
+                onWheel: (event) => {
+                    if (event.angleDelta.y > 0) {
+                        timelineRoot.trackHeight = Math.min(200, timelineRoot.trackHeight + 10);
+                    } else {
+                        timelineRoot.trackHeight = Math.max(40, timelineRoot.trackHeight - 10);
+                    }
+                }
+            }
+
             // Wrap inside clip area
             Item {
                 implicitWidth: Math.max(timelineScroll.width, 180 + timeToX(timelineManager.totalDuration) + 300)
@@ -307,7 +408,15 @@ Rectangle {
 
                     // Draw ruler second markers dynamically using Canvas
                     Canvas {
+                        id: rulerCanvas
                         anchors.fill: parent
+                        
+                        // Repaint when zoom level changes
+                        Connections {
+                            target: timelineRoot
+                            function onZoomFactorChanged() { rulerCanvas.requestPaint(); }
+                        }
+                        
                         onPaint: {
                             var ctx = getContext("2d");
                             ctx.clearRect(0, 0, width, height);
@@ -482,7 +591,7 @@ Rectangle {
                             trackMuted: model.trackMuted
                             trackLocked: model.trackLocked
                             zoom: zoomFactor
-                            height: timelineRoot.compactTracks ? 60 : 90
+                            height: timelineRoot.trackHeight
                             scrollX: timelineRoot.scrollX
                         }
                     }
@@ -503,7 +612,7 @@ Rectangle {
                         if (drop.hasUrls) {
                             drop.accepted = true;
                             
-                            var trackHeight = timelineRoot.compactTracks ? 60 : 90;
+                            var trackHeight = timelineRoot.trackHeight;
                             var spacing = 1;
                             var trackIdx = Math.floor(drop.y / (trackHeight + spacing));
                             

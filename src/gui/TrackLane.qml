@@ -48,8 +48,8 @@ Rectangle {
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 8
-                spacing: 4
+                anchors.margins: trackLaneRoot.height >= 70 ? 8 : 4
+                spacing: trackLaneRoot.height >= 70 ? 4 : 1
 
                 // Track Name Label
                 RowLayout {
@@ -63,7 +63,7 @@ Rectangle {
                     Label {
                         text: trackName
                         font.bold: true
-                        font.pixelSize: 16
+                        font.pixelSize: trackLaneRoot.height >= 70 ? 16 : 13
                         color: rootWindow.colorTextPrimary
                         elide: Text.ElideRight
                         Layout.fillWidth: true
@@ -75,10 +75,11 @@ Rectangle {
                     text: trackType === 0 ? "AUDIO TRACK" : (trackType === 1 ? "VIDEO TRACK" : "LYRIC CUES")
                     font.pixelSize: 13
                     color: trackType === 0 ? rootWindow.colorTextSecondary : (trackType === 1 ? "#FFAB40" : rootWindow.colorAccentGreen)
+                    visible: trackLaneRoot.height >= 70
                 }
 
                 RowLayout {
-                    visible: trackType === 2
+                    visible: trackType === 2 && trackLaneRoot.height >= 70
                     spacing: 6
                     Layout.fillWidth: true
 
@@ -156,7 +157,7 @@ Rectangle {
 
                 // Volume Slider (only for Audio track and if height is not compact)
                 RowLayout {
-                    visible: trackType === 0 && trackLaneRoot.height > 65
+                    visible: trackType === 0 && trackLaneRoot.height >= 65
                     spacing: 6
                     Layout.fillWidth: true
                     Label {
@@ -199,6 +200,7 @@ Rectangle {
 
                 // Buttons: Mute / Lock / Delete
                 RowLayout {
+                    visible: trackLaneRoot.height >= 55
                     spacing: 6
 
                     // Mute Toggle Button

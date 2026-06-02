@@ -115,9 +115,10 @@ void ClipListModel::handleClipRemoved(const QString& clipId) {
 }
 
 void ClipListModel::handleClipsChanged() {
-    // If order changes due to sorting, we trigger a layoutChanged to update QML list positions
-    emit layoutAboutToBeChanged();
-    emit layoutChanged();
+    beginResetModel();
+    teardownConnections();
+    setupConnections();
+    endResetModel();
 }
 
 void ClipListModel::setupConnections() {

@@ -64,6 +64,7 @@ TimelineManager::TimelineManager(QObject* parent)
     // Rebuild lyric cache when tracks/clips change
     connect(m_trackListModel, &TrackListModel::trackAdded, this, [this](Track* track) {
         connect(track, &Track::clipsChanged, m_lyricEngine, &LyricEngine::rebuildLineCache);
+        connect(track, &Track::clipsChanged, this, &TimelineManager::timelineChanged);
         m_lyricEngine->rebuildLineCache();
     });
 }
@@ -379,6 +380,7 @@ QString TimelineManager::addTrack(int type, const QString& name) {
     Track* track = new Track(QString(), castedType, name, this);
     m_trackListModel->addTrack(track);
     setIsDirty(true);
+    emit timelineChanged();
     return track->trackId();
 }
 
@@ -386,6 +388,7 @@ bool TimelineManager::removeTrack(const QString& trackId) {
     bool result = m_trackListModel->removeTrack(trackId);
     if (result) {
         setIsDirty(true);
+        emit timelineChanged();
     }
     return result;
 }
@@ -437,6 +440,12 @@ bool TimelineManager::addClipToTrack(const QString& trackId, const QString& clip
     if (!sourceFile.isEmpty()) {
         clip->setSourceFile(sourceFile);
         clip->setSourceDuration(clipDuration);
+        
+        // Auto-guess song title and artist from filename if current metadata is empty or default
+        if ((m_songTitle == "Untitled Song" || m_songTitle.isEmpty()) && 
+            (m_artistName == "Unknown Artist" || m_artistName.isEmpty())) {
+            guessMetadataFromFilename(sourceFile);
+        }
     }
     if (!lyricText.isEmpty()) {
         clip->setLyricText(lyricText);
@@ -489,6 +498,12 @@ bool TimelineManager::addClipToTrackWithSourceStart(const QString& trackId, cons
         clip->setSourceFile(sourceFile);
         clip->setSourceStart(sourceStart);
         clip->setSourceDuration(fullSourceDuration);
+        
+        // Auto-guess song title and artist from filename if current metadata is empty or default
+        if ((m_songTitle == "Untitled Song" || m_songTitle.isEmpty()) && 
+            (m_artistName == "Unknown Artist" || m_artistName.isEmpty())) {
+            guessMetadataFromFilename(sourceFile);
+        }
     }
     if (!lyricText.isEmpty()) {
         clip->setLyricText(lyricText);
@@ -1642,6 +1657,81 @@ void TimelineManager::setDisableHwDecoding(bool disable) {
 void TimelineManager::restartApplication() {
     QProcess::startDetached(QCoreApplication::applicationFilePath(), QCoreApplication::arguments());
     QCoreApplication::quit();
+}
+
+void TimelineManager::guessMetadataFromFilename(const QString& filePath) {
+    QFileInfo fileInfo(filePath);
+    QString filename = fileInfo.completeBaseName(); // filename without extension
+
+    // 1. Remove common noise suffixes
+    static const QStringList suffixesToRemove = {
+        " (karaoke)", " [karaoke]", " (instrumental)", " [instrumental]",
+        " (vocal)", " [vocal]", " (vocals)", " [vocals]",
+        " (official video)", " [official video]", " (official audio)", " [official audio]",
+        " (lyrics video)", " (lyrics)", " [lyrics]",
+        "_vocals", "_instruments", "_instrumental", "_spleeter", "_demucs"
+    };
+
+    for (const QString& suffix : suffixesToRemove) {
+        int idx = filename.indexOf(suffix, 0, Qt::CaseInsensitive);
+        while (idx != -1) {
+            filename.remove(idx, suffix.length());
+            idx = filename.indexOf(suffix, 0, Qt::CaseInsensitive);
+        }
+    }
+    filename = filename.trimmed();
+
+    // 2. Try to split by common delimiters
+    QString guessedArtist = "";
+    QString guessedTitle = "";
+
+    int dashIdx = filename.indexOf(" - ");
+    if (dashIdx == -1) {
+        dashIdx = filename.indexOf(" -");
+    }
+    if (dashIdx == -1) {
+        dashIdx = filename.indexOf("- ");
+    }
+    if (dashIdx == -1) {
+        dashIdx = filename.indexOf(" _ ");
+    }
+    if (dashIdx == -1) {
+        dashIdx = filename.indexOf("-");
+    }
+
+    if (dashIdx != -1) {
+        guessedArtist = filename.left(dashIdx).trimmed();
+        int delimLen = 1;
+        if (filename.mid(dashIdx, 3) == " - " || filename.mid(dashIdx, 3) == " _ ") {
+            delimLen = 3;
+        } else if (filename.mid(dashIdx, 2) == " -" || filename.mid(dashIdx, 2) == "- ") {
+            delimLen = 2;
+        }
+        guessedTitle = filename.mid(dashIdx + delimLen).trimmed();
+    } else {
+        guessedTitle = filename;
+    }
+
+    // Capitalize words nicely if they are all lowercase
+    auto capitalize = [](QString str) -> QString {
+        if (str.isEmpty()) return str;
+        QStringList words = str.split(' ', Qt::SkipEmptyParts);
+        for (int i = 0; i < words.size(); ++i) {
+            if (!words[i].isEmpty()) {
+                words[i][0] = words[i][0].toUpper();
+            }
+        }
+        return words.join(' ');
+    };
+
+    if (!guessedArtist.isEmpty()) {
+        guessedArtist = capitalize(guessedArtist);
+        setArtistName(guessedArtist);
+    }
+    if (!guessedTitle.isEmpty()) {
+        guessedTitle = capitalize(guessedTitle);
+        setSongTitle(guessedTitle);
+    }
 }
 
 } // namespace ncktv

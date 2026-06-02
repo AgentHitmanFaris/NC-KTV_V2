@@ -459,8 +459,8 @@ bool StemSeparator::separate(const std::vector<float>& input48kStereo,
     }
 
     // Write WAV files with corrected channel stem mappings
-    if (!writeWavFile(vocalsPath, inst48k, 48000)) return false;
-    if (!writeWavFile(instrumentalPath, vocals48k, 48000)) return false;
+    if (!writeWavFile(vocalsPath, vocals48k, 48000)) return false;
+    if (!writeWavFile(instrumentalPath, inst48k, 48000)) return false;
 
     std::cout << "[StemSeparator] Completed separating stems. Outputs written to:\n"
               << "Vocals: " << vocalsPath.toStdString() << "\n"

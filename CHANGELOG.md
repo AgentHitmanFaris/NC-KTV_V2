@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Performance
+- Overhauled C++ `KaraokeLyricRenderer` to pre-render styled text lines into `QImage` textures and cache font-specific layouts. Real-time playhead updates now perform simple O(1) texture blits instead of CPU-intensive path vector calculations and rasterization (`QPainterPath::addText`, `strokePath`, `fillPath`) on the GUI thread, resolving video playback lag.
+- Eliminated infinite `SequentialAnimation` loop on the branding dot indicator that ran 24/7 consuming animation frames even when idle.
+- Removed `layer.enabled: true` from the intro splash breathing circle, which forced unnecessary offscreen GPU texture allocation.
+- Replaced `Math.random()` calls in the program monitor and source monitor Canvas visualizers with deterministic sine-wave patterns, eliminating forced GPU repaints every frame.
+- Reduced source monitor visualizer timer interval from 33ms (30fps) to 50ms (20fps) and gated it behind visibility check.
+- Optimized ClipItem `sweepProgress` calculation to short-circuit when the playhead is outside the clip's time range, reducing per-frame work from O(clips × syllables) to O(1) for inactive clips.
+- Removed redundant overlapping MouseArea in ClipItem that duplicated selection handling already performed by the drag MouseArea.
+- Replaced N per-delegate `isActive` syllable bindings in PropertiesPanel with a single centrally-computed `activeSylIdx` property, reducing binding evaluations from O(N) to O(1) per playhead tick.
+- Added zoom-change repaint trigger to the timeline ruler Canvas to prevent stale tick marks after zooming.
+
 ### Added
 - Internal Media Library drag-and-drop support: you can now drag-and-drop media assets directly from the Media Browser list onto the timeline tracks to insert them.
 - Global persistent software decoding preference setting (`disable_hw_decoding` in `QSettings`) that disables hardware acceleration for the Qt Multimedia FFmpeg backend on startup to resolve device/texture allocation failures (like `8007000e`) for 4K and AV1 files.
@@ -27,6 +38,10 @@ All notable changes to this project will be documented in this file.
 - Fully functional "+ VIDEO TRACK" creation button in the timeline control header.
 - Custom orange color accents and layout styling tags for Video Tracks inside the timeline lane headers.
 - Horizontal playback auto-scrolling viewport follow in TimelineView.qml, automatically keeping the playhead visible and centered at 25% of the tracks area during active playback.
+- Premiere Pro-style continuous vertical track zooming from 40px to 200px in the timeline tracks area, with toolbar zoom controls (slider and increment buttons) and mouse wheel shortcuts (`Ctrl / Shift + Wheel` to zoom vertically, `Alt + Wheel` to zoom horizontally).
+- "New Project" button (`btnNew`) and action flow in the main header toolbar that resets the workspace tracks layout, timeline manager, active metadata, and selection, with dialog prompts to prevent losing unsaved changes.
+- C++ `TimelineManager::timelineChanged()` signal that acts as a single gateway to propagate track `clipsChanged`, clip `durationChanged`, and clip `lyricTextChanged` events to QML.
+- Automatic metadata guesser in C++ `TimelineManager` that parses imported media filenames to extract and capitalize clean Song Title and Artist Name metadata.
 
 ### Changed
 - Re-anchored the root window's global `DropArea` and glassmorphic overlay to exclude the timeline editor area. This prevents the global drop area from shadowing/intercepting drop events, allowing files dragged directly onto the timeline tracks to be correctly added as clips and snapped to the drop point.
@@ -36,6 +51,8 @@ All notable changes to this project will be documented in this file.
 - Decoupled active clip dragging and trimming coordinates to use native QML drag targets, deferring C++ model writes and expensive waveform rebuilds to mouse release for smooth 60fps movement.
 - Exposed horizontal scroll coordinate `scrollX` from `TimelineView` to delegate `TrackLane` templates to resolve undeclared warning outputs.
 - Qualified the `snappingEnabled` and `compactTracks` properties inside `TimelineView.qml` with the root ID `timelineRoot` to resolve QML ReferenceError console warnings.
+- Gated the video preview seek synchronization behind a drift threshold of 1000.0ms (up from 250ms) to ensure smooth playback without constant seeking and stuttering.
+- Scaled and fixed layout size dimensions and button bounds (timecodes, nudge buttons, offset and duration columns) in the Properties Panel to prevent text wrapping or clipping.
 
 ### Fixed
 - Fixed playback compatibility issues for high-resolution (2K/4K) and AV1-encoded videos by providing a software decoding fallback mechanism.
@@ -47,4 +64,8 @@ All notable changes to this project will be documented in this file.
 - Resolved video clip placement bugs where Video files incorrectly mapped to Audio tracks and could not be loaded into Video lanes.
 - Fixed playhead jumping when clicking on track headers in TimelineView.qml by adding a bounds check to the ruler MouseArea.
 - Fixed ONNX Runtime GPU execution provider loader failure by updating the CMake post-build script to copy all runtime library DLLs (including cuda, tensorrt, and shared providers) to the executable directory, allowing CUDA GPU-accelerated stem separation.
+- Resolved vocal/instrumental audio channel swap by correcting C++ WAV writing buffer paths in `stem_separator.cpp`.
+- Fixed the song title and artist metadata synchronization bug on intro splash launch in `main.qml`.
+- Fixed vertical panel collapsing of `MediaBrowser` (left pane) and `PropertiesPanel` (right pane) by binding their heights explicitly to `parent.height`.
+- Resolved application freezes during bulk lyric/track replacements by adding `beginResetModel()` and `endResetModel()` blocks to `ClipListModel::handleClipsChanged()`.
 

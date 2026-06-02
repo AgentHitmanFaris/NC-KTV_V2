@@ -215,6 +215,7 @@ signals:
     void mediaListChanged();
     void isDirtyChanged();
     void mediaSeparationCompleted(const QString& vocalsPath, const QString& instPath);
+    void timelineChanged();
     
     // Subtitle style and markers signals
     void subtitleFontFamilyChanged();
@@ -246,6 +247,7 @@ private slots:
 
 private:
     void recalculateTotalDuration();
+    void guessMetadataFromFilename(const QString& filePath);
 
     qint64 m_currentPlayheadTime = 0; // In Microseconds
     qint64 m_totalDuration = 0;       // In Microseconds

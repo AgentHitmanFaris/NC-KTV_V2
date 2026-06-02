@@ -52,6 +52,7 @@ public:
     // Clip Management
     Q_INVOKABLE bool addClip(Clip* clip);
     Q_INVOKABLE bool removeClip(const QString& clipId);
+    Q_INVOKABLE void clearClips();
     Q_INVOKABLE Clip* getClip(const QString& clipId) const;
     Q_INVOKABLE QList<Clip*> getClipsAtTime(qint64 timeMicroseconds) const;
     

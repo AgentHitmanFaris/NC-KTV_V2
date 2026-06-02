@@ -11,6 +11,8 @@
 #include <QLinearGradient>
 #include <QRadialGradient>
 #include <QElapsedTimer>
+#include <QMap>
+#include <QImage>
 
 #include "timeline/lyric_engine.h"
 
@@ -135,15 +137,24 @@ private:
         qreal rightX = 0;
     };
 
+    struct RenderCache {
+        QFont font;
+        qreal totalWidth = 0;
+        qreal totalHeight = 0;
+        QList<CachedWord> cachedWords;
+        mutable QMap<QRgb, QImage> images;
+    };
+
     struct CachedLine {
         int index = -1;
         QString text;
         qint64 startTime = 0;
         qint64 endTime = 0;
         QList<CachedWord> cachedWords;
-        bool layoutsValid = false;
-        qreal totalWidth = 0;
-        qreal totalHeight = 0;
+        
+        mutable QList<RenderCache> caches;
+        
+        const RenderCache& getCache(const QFont& font) const;
     };
 
     // Helper rendering routines
@@ -153,10 +164,10 @@ private:
     void renderCinematicFullScreen(QPainter* painter);
 
     void drawVignette(QPainter* painter);
-    void drawStyledText(QPainter* painter, const QString& text, const QPointF& pos, const QFont& font, const QColor& fill, const QColor& outline, int outlineWidth, int alignFlags = Qt::AlignCenter);
+    void drawStyledText(QPainter* painter, CachedLine* line, const QString& text, const QPointF& pos, const QFont& font, const QColor& fill, const QColor& outline, int outlineWidth, int alignFlags = Qt::AlignCenter);
+    QImage generateTextImage(const QString& text, const QFont& font, const QColor& fill, const QColor& outline, int outlineWidth, qreal totalWidth, qreal totalHeight);
     
     // Layout helpers
-    void validateLineLayouts(CachedLine& line, const QFont& font);
     int findActiveLineIndex(qint64 timestampMs) const;
     void syncWithEngine();
 

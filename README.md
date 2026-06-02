@@ -76,9 +76,46 @@ The application relies on these main static and dynamic components:
 
 ---
 
-## 🔮 Future Improvements
+## 🔮 Future Roadmap & Todo List
 
-* **Multi-Format Export**: Add support for rendering to AVI, MKV, and custom audio-only tracks.
-* **Syllable Tuning Curves**: Visually manipulate the sweep rate using bezier curve handles in the timeline inspector.
-* **Vocal Alignment Helpers**: Automatically align loaded cover vocals with downloaded guide tracks using cross-correlation DSP algorithms.
-* **Cloud Project Sync**: Shared project databases for collaborative karaoke creations.
+### 📝 Immediate Priorities (Todo List)
+- [ ] **Syllable Tuning Curves**: Implement interactive Bezier curve handles in the timeline inspector to manually manipulate syllable-level swipe sweeps.
+- [ ] **Vocal Alignment Helpers**: Add a cross-correlation DSP helper to automatically synchronize recorded or loaded vocals with guide tracks.
+- [ ] **Waveform Cache Persistence**: Write generated audio peaks cache to file storage (`.pk` files) to eliminate waveform generation delays on reload.
+- [ ] **Expanded Audio Filters**: Add basic equalizer, reverb, and delay DSP filters to the tracks.
+
+### 🚀 Mid-Term Goals
+- [ ] **Multi-Format Video Rendering**: Add container selections for export (e.g., MKV, WebM, AVI) and dedicated MP3/WAV audio mixdowns.
+- [ ] **Custom Swipe Layout Templates**: Allow saving preset layouts for custom font packages, sweep speeds, and bouncing balls.
+- [ ] **Dynamic Video Transcoding**: Automatically transcode heavy, hardware-unfriendly video formats during import to improve runtime performance.
+
+### 🌐 Long-Term Roadmap
+- [ ] **Cloud Collaboration Support**: Collaborative project sync for multi-user editing teams.
+- [ ] **Extension SDK**: Create a plugin system for custom transition filters and audio effects.
+
+---
+
+## 📄 Recent Changelog
+
+### Version 2.0.0-Professional (Unreleased Updates)
+
+#### Added
+- **Timeline Vertical Zoom**: Continuous vertical zooming (40px to 200px) with dedicated toolbar sliders and keyboard/mouse wheel shortcuts (`Ctrl / Shift + Wheel`).
+- **New Project Utility**: Real-time project resets with warnings to prevent losing unsaved changes.
+- **Filename Parser (Metadata Guesser)**: Automated cleanup and capitalization parsing on imported files to resolve Song Title and Artist metadata automatically.
+- **C++ Unified Event Propagation**: Single-gateway QML notification system (`timelineChanged()`) for all clip and track edits.
+- **LRCLIB Lyrics Database**: Direct in-app retrieval, previewing, and importing of synced lyrics.
+- **Asynchronous YouTube Downloader**: Embedded YT discover browser with direct import and background queue downloads.
+- **Safe Decoding Toggle**: One-click software decoding mode option to bypass hardware acceleration rendering freezes.
+
+#### Changed
+- **Video Sync Gating**: Seek drift threshold increased to 1000.0ms for stutter-free playback.
+- **Cleaned Properties Panel Spacing**: Legible layouts for coordinate timecodes, nudge controls, and syllable durations.
+- **GPU-Texture Caching**: Overhauled karaoke text rendering using O(1) texture copy routines.
+
+#### Fixed
+- **Left/Right Panels Stretching**: Resolved panel collapsing in horizontal `SplitView` by binding heights to `parent.height`.
+- **WAV Buffer Swap**: Fixed vocal/instrumental audio stem separations writing to opposite tracks in `stem_separator.cpp`.
+- **Intro Splash Sync**: Resolved title/artist rendering delays during startup intro animations.
+- **Track Selection Shadows**: Prevented drag events from being captured by the outer window's drop zone.
+

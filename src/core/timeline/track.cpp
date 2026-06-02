@@ -85,6 +85,8 @@ bool Track::addClip(Clip* clip) {
         });
         emit clipsChanged();
     });
+    connect(clip, &Clip::durationChanged, this, &Track::clipsChanged);
+    connect(clip, &Clip::lyricTextChanged, this, &Track::clipsChanged);
 
     emit clipAdded(clip);
     emit clipsChanged();
@@ -111,6 +113,22 @@ bool Track::removeClip(const QString& clipId) {
         }
     }
     return false;
+}
+
+void Track::clearClips() {
+    if (m_isLocked || m_clips.isEmpty()) {
+        return;
+    }
+
+    QList<Clip*> tempClips = m_clips;
+    m_clips.clear();
+
+    for (Clip* clip : tempClips) {
+        clip->disconnect(this);
+        clip->deleteLater();
+    }
+
+    emit clipsChanged();
 }
 
 Clip* Track::getClip(const QString& clipId) const {

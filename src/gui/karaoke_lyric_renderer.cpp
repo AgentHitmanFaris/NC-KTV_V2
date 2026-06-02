@@ -311,49 +311,48 @@ void KaraokeLyricRenderer::renderBottomTwoLine(QPainter* painter)
 
         if (nextIdx >= 0) {
             CachedLine& line = m_cachedLines[nextIdx];
-            validateLineLayouts(line, font);
             // Draw upcoming lyric centered at the first line position in muted gray/white
             qreal firstLineY = height - m_fontSize * 2.8;
-            drawStyledText(painter, line.text, QPointF(midX, firstLineY), font, QColor(200, 200, 200, 180), m_outlineColor, m_outlineWidth);
+            drawStyledText(painter, &line, line.text, QPointF(midX, firstLineY), font, QColor(200, 200, 200, 180), m_outlineColor, m_outlineWidth);
         } else {
             qreal firstLineY = height - m_fontSize * 2.8;
-            drawStyledText(painter, "(Waiting for lyric cues)", QPointF(midX, firstLineY), font, QColor(128, 128, 128, 128), m_outlineColor, m_outlineWidth);
+            drawStyledText(painter, nullptr, "(Waiting for lyric cues)", QPointF(midX, firstLineY), font, QColor(128, 128, 128, 128), m_outlineColor, m_outlineWidth);
         }
         return;
     }
 
     // Active line
     CachedLine& line = m_cachedLines[activeIdx];
-    validateLineLayouts(line, font);
+    const RenderCache& cache = line.getCache(font);
 
     // Calculate Sweep Position (pixel-perfect)
     qreal sweepX = 0;
-    qreal startX = midX - (line.totalWidth / 2.0);
-    qreal endX = midX + (line.totalWidth / 2.0);
+    qreal startX = midX - (cache.totalWidth / 2.0);
+    qreal endX = midX + (cache.totalWidth / 2.0);
 
     qint64 lineDuration = line.endTime - line.startTime;
     qint64 elapsed = m_currentTimestamp - line.startTime;
 
-    if (line.cachedWords.isEmpty()) {
+    if (cache.cachedWords.isEmpty()) {
         double progress = (lineDuration > 0) ? qBound(0.0, static_cast<double>(elapsed) / lineDuration, 1.0) : 1.0;
-        sweepX = startX + progress * line.totalWidth;
+        sweepX = startX + progress * cache.totalWidth;
     } else {
-        if (m_currentTimestamp < line.cachedWords.first().startTime) {
+        if (m_currentTimestamp < cache.cachedWords.first().startTime) {
             sweepX = startX;
-        } else if (m_currentTimestamp >= line.cachedWords.last().endTime) {
+        } else if (m_currentTimestamp >= cache.cachedWords.last().endTime) {
             sweepX = endX;
         } else {
-            for (int i = 0; i < line.cachedWords.size(); ++i) {
-                const auto& w = line.cachedWords[i];
+            for (int i = 0; i < cache.cachedWords.size(); ++i) {
+                const auto& w = cache.cachedWords[i];
                 if (m_currentTimestamp >= w.startTime && m_currentTimestamp <= w.endTime) {
                     qint64 wDuration = w.endTime - w.startTime;
                     double wordProg = (wDuration > 0) ? qBound(0.0, static_cast<double>(m_currentTimestamp - w.startTime) / wDuration, 1.0) : 1.0;
                     sweepX = startX + w.leftX + wordProg * (w.rightX - w.leftX);
                     break;
-                } else if (i < line.cachedWords.size() - 1 && 
+                } else if (i < cache.cachedWords.size() - 1 && 
                            m_currentTimestamp > w.endTime && 
-                           m_currentTimestamp < line.cachedWords[i+1].startTime) {
-                    const auto& nextW = line.cachedWords[i+1];
+                           m_currentTimestamp < cache.cachedWords[i+1].startTime) {
+                    const auto& nextW = cache.cachedWords[i+1];
                     qint64 gap = nextW.startTime - w.endTime;
                     double gapProg = (gap > 0) ? qBound(0.0, static_cast<double>(m_currentTimestamp - w.endTime) / gap, 1.0) : 1.0;
                     sweepX = startX + w.rightX + gapProg * (nextW.leftX - w.rightX);
@@ -366,14 +365,14 @@ void KaraokeLyricRenderer::renderBottomTwoLine(QPainter* painter)
     qreal activeY = height - m_fontSize * 2.8;
 
     // Draw active line inactive backdrop (White/Light Gray)
-    drawStyledText(painter, line.text, QPointF(midX, activeY), font, QColor(220, 220, 220), m_outlineColor, m_outlineWidth);
+    drawStyledText(painter, &line, line.text, QPointF(midX, activeY), font, QColor(220, 220, 220), m_outlineColor, m_outlineWidth);
 
     // Draw active portion (swept in Gold/Orange)
     painter->save();
-    QRectF clipRect(startX - 10, activeY - line.totalHeight, (sweepX - startX) + 10, line.totalHeight * 2);
+    QRectF clipRect(startX - 10, activeY - cache.totalHeight, (sweepX - startX) + 10, cache.totalHeight * 2);
     painter->setClipRect(clipRect);
     QColor activeFillColor(255, 176, 0); // Gold
-    drawStyledText(painter, line.text, QPointF(midX, activeY), font, activeFillColor, m_outlineColor, m_outlineWidth);
+    drawStyledText(painter, &line, line.text, QPointF(midX, activeY), font, activeFillColor, m_outlineColor, m_outlineWidth);
     painter->restore();
 
     // Render Guide Cursor "|" with Glow
@@ -382,18 +381,18 @@ void KaraokeLyricRenderer::renderBottomTwoLine(QPainter* painter)
         painter->setRenderHint(QPainter::Antialiasing, true);
 
         // Radial glow behind cursor
-        QRadialGradient glow(QPointF(sweepX, activeY), line.totalHeight * 0.5);
+        QRadialGradient glow(QPointF(sweepX, activeY), cache.totalHeight * 0.5);
         glow.setColorAt(0.0, QColor(255, 165, 0, 100)); // Gold/Orange glow
         glow.setColorAt(1.0, QColor(255, 165, 0, 0));
         painter->setBrush(glow);
         painter->setPen(Qt::NoPen);
-        painter->drawEllipse(QPointF(sweepX, activeY), line.totalHeight * 0.4, line.totalHeight * 0.4);
+        painter->drawEllipse(QPointF(sweepX, activeY), cache.totalHeight * 0.4, cache.totalHeight * 0.4);
 
         // Vertical Guide Line
         QPen cursorPen(QColor(255, 215, 0), 2.5);
         painter->setPen(cursorPen);
-        painter->drawLine(QPointF(sweepX, activeY - line.totalHeight * 0.4), 
-                          QPointF(sweepX, activeY + line.totalHeight * 0.4));
+        painter->drawLine(QPointF(sweepX, activeY - cache.totalHeight * 0.4), 
+                          QPointF(sweepX, activeY + cache.totalHeight * 0.4));
         painter->restore();
     }
 
@@ -404,10 +403,9 @@ void KaraokeLyricRenderer::renderBottomTwoLine(QPainter* painter)
         QFont upcomingFont(m_fontFamily, m_fontSize * 0.85);
         upcomingFont.setStyleHint(QFont::Serif);
         upcomingFont.setBold(true);
-        validateLineLayouts(nextLine, upcomingFont);
 
         qreal upcomingY = height - m_fontSize * 1.2;
-        drawStyledText(painter, nextLine.text, QPointF(midX, upcomingY), upcomingFont, QColor(160, 160, 160, 180), m_outlineColor, m_outlineWidth);
+        drawStyledText(painter, &nextLine, nextLine.text, QPointF(midX, upcomingY), upcomingFont, QColor(160, 160, 160, 180), m_outlineColor, m_outlineWidth);
     }
 }
 
@@ -438,7 +436,7 @@ void KaraokeLyricRenderer::renderCenterScrollQueue(QPainter* painter)
         // Show waiting cues if list is empty
         QFont font(m_fontFamily, m_fontSize);
         font.setStyleHint(QFont::Serif);
-        drawStyledText(painter, "(Waiting for lyric cues)", 
+        drawStyledText(painter, nullptr, "(Waiting for lyric cues)", 
                        boundingRect().center(), font, 
                        QColor(128, 128, 128, 128), m_outlineColor, m_outlineWidth);
         return;
@@ -458,15 +456,13 @@ void KaraokeLyricRenderer::renderCenterScrollQueue(QPainter* painter)
         if (idx < 0 || idx >= m_cachedLines.size()) continue;
 
         CachedLine& line = m_cachedLines[idx];
-        validateLineLayouts(line, font);
-
         qreal yPos = midY + offset * lineSpacing;
         
         // Colors & opacity calculations
         bool isActive = (idx == activeIdx);
         QColor fill = isActive ? QColor(255, 255, 255, 255) : QColor(128, 128, 128, 128); // 100% white vs 50% opacity gray
 
-        drawStyledText(painter, line.text, QPointF(midX, yPos), font, fill, m_outlineColor, m_outlineWidth);
+        drawStyledText(painter, &line, line.text, QPointF(midX, yPos), font, fill, m_outlineColor, m_outlineWidth);
     }
 }
 
@@ -500,51 +496,50 @@ void KaraokeLyricRenderer::renderWordBounce(QPainter* painter)
 
         if (nextIdx >= 0) {
             CachedLine& line = m_cachedLines[nextIdx];
-            validateLineLayouts(line, font);
             // Draw upcoming lyrics early in muted white/light gray
-            drawStyledText(painter, line.text, QPointF(midX, midY), font, QColor(180, 180, 180, 150), m_outlineColor, m_outlineWidth);
+            drawStyledText(painter, &line, line.text, QPointF(midX, midY), font, QColor(180, 180, 180, 150), m_outlineColor, m_outlineWidth);
         } else {
-            drawStyledText(painter, "(Waiting for lyric cues)", QPointF(midX, midY), font, QColor(128, 128, 128, 128), m_outlineColor, m_outlineWidth);
+            drawStyledText(painter, nullptr, "(Waiting for lyric cues)", QPointF(midX, midY), font, QColor(128, 128, 128, 128), m_outlineColor, m_outlineWidth);
         }
         return;
     }
 
     // Active line rendering
     CachedLine& line = m_cachedLines[activeIdx];
-    validateLineLayouts(line, font);
+    const RenderCache& cache = line.getCache(font);
 
     // Calculate Sweep Position (pixel-perfect)
     qreal sweepX = 0;
-    qreal startX = midX - (line.totalWidth / 2.0);
-    qreal endX = midX + (line.totalWidth / 2.0);
+    qreal startX = midX - (cache.totalWidth / 2.0);
+    qreal endX = midX + (cache.totalWidth / 2.0);
 
     qint64 lineDuration = line.endTime - line.startTime;
     qint64 elapsed = m_currentTimestamp - line.startTime;
 
-    if (line.cachedWords.isEmpty()) {
+    if (cache.cachedWords.isEmpty()) {
         // Linear fallback if no word timings
         double progress = (lineDuration > 0) ? qBound(0.0, static_cast<double>(elapsed) / lineDuration, 1.0) : 1.0;
-        sweepX = startX + progress * line.totalWidth;
+        sweepX = startX + progress * cache.totalWidth;
     } else {
         // Calculate based on exact syllable/word timings
-        if (m_currentTimestamp < line.cachedWords.first().startTime) {
+        if (m_currentTimestamp < cache.cachedWords.first().startTime) {
             sweepX = startX;
-        } else if (m_currentTimestamp >= line.cachedWords.last().endTime) {
+        } else if (m_currentTimestamp >= cache.cachedWords.last().endTime) {
             sweepX = endX;
         } else {
             // Find active word
-            for (int i = 0; i < line.cachedWords.size(); ++i) {
-                const auto& w = line.cachedWords[i];
+            for (int i = 0; i < cache.cachedWords.size(); ++i) {
+                const auto& w = cache.cachedWords[i];
                 if (m_currentTimestamp >= w.startTime && m_currentTimestamp <= w.endTime) {
                     qint64 wDuration = w.endTime - w.startTime;
                     double wordProg = (wDuration > 0) ? qBound(0.0, static_cast<double>(m_currentTimestamp - w.startTime) / wDuration, 1.0) : 1.0;
                     sweepX = startX + w.leftX + wordProg * (w.rightX - w.leftX);
                     break;
-                } else if (i < line.cachedWords.size() - 1 && 
+                } else if (i < cache.cachedWords.size() - 1 && 
                            m_currentTimestamp > w.endTime && 
-                           m_currentTimestamp < line.cachedWords[i+1].startTime) {
+                           m_currentTimestamp < cache.cachedWords[i+1].startTime) {
                     // Transition between words
-                    const auto& nextW = line.cachedWords[i+1];
+                    const auto& nextW = cache.cachedWords[i+1];
                     qint64 gap = nextW.startTime - w.endTime;
                     double gapProg = (gap > 0) ? qBound(0.0, static_cast<double>(m_currentTimestamp - w.endTime) / gap, 1.0) : 1.0;
                     sweepX = startX + w.rightX + gapProg * (nextW.leftX - w.rightX);
@@ -555,18 +550,18 @@ void KaraokeLyricRenderer::renderWordBounce(QPainter* painter)
     }
 
     // Draw Inactive backdrop (White/Light Gray)
-    drawStyledText(painter, line.text, QPointF(midX, midY), font, QColor(220, 220, 220), m_outlineColor, m_outlineWidth);
+    drawStyledText(painter, &line, line.text, QPointF(midX, midY), font, QColor(220, 220, 220), m_outlineColor, m_outlineWidth);
 
     // Draw Active Swept overlay clipped to sweepX
     painter->save();
     
     // Set clipping bounds to sweep progress
-    QRectF clipRect(startX - 10, midY - line.totalHeight, (sweepX - startX) + 10, line.totalHeight * 2);
+    QRectF clipRect(startX - 10, midY - cache.totalHeight, (sweepX - startX) + 10, cache.totalHeight * 2);
     painter->setClipRect(clipRect);
 
     // Draw active portion in Gold/Orange (#FFB000 or #FFA500)
     QColor activeFillColor(255, 176, 0); // Gold
-    drawStyledText(painter, line.text, QPointF(midX, midY), font, activeFillColor, m_outlineColor, m_outlineWidth);
+    drawStyledText(painter, &line, line.text, QPointF(midX, midY), font, activeFillColor, m_outlineColor, m_outlineWidth);
     painter->restore();
 
     // Render Guide Cursor "|" with Glow
@@ -575,18 +570,18 @@ void KaraokeLyricRenderer::renderWordBounce(QPainter* painter)
         painter->setRenderHint(QPainter::Antialiasing, true);
 
         // Radial glow behind cursor
-        QRadialGradient glow(QPointF(sweepX, midY), line.totalHeight * 0.5);
+        QRadialGradient glow(QPointF(sweepX, midY), cache.totalHeight * 0.5);
         glow.setColorAt(0.0, QColor(255, 165, 0, 100)); // Gold/Orange glow
         glow.setColorAt(1.0, QColor(255, 165, 0, 0));
         painter->setBrush(glow);
         painter->setPen(Qt::NoPen);
-        painter->drawEllipse(QPointF(sweepX, midY), line.totalHeight * 0.4, line.totalHeight * 0.4);
+        painter->drawEllipse(QPointF(sweepX, midY), cache.totalHeight * 0.4, cache.totalHeight * 0.4);
 
         // Vertical Guide Line
         QPen cursorPen(QColor(255, 215, 0), 2.5); // Golden cursor line
         painter->setPen(cursorPen);
-        painter->drawLine(QPointF(sweepX, midY - line.totalHeight * 0.4), 
-                          QPointF(sweepX, midY + line.totalHeight * 0.4));
+        painter->drawLine(QPointF(sweepX, midY - cache.totalHeight * 0.4), 
+                          QPointF(sweepX, midY + cache.totalHeight * 0.4));
         
         painter->restore();
     }
@@ -597,9 +592,8 @@ void KaraokeLyricRenderer::renderWordBounce(QPainter* painter)
         CachedLine& nextLine = m_cachedLines[upcomingIdx];
         QFont upcomingFont(m_fontFamily, m_fontSize * 0.8);
         upcomingFont.setStyleHint(QFont::Serif);
-        validateLineLayouts(nextLine, upcomingFont);
         
-        drawStyledText(painter, nextLine.text, QPointF(midX, midY + m_fontSize * 2.0), upcomingFont, QColor(140, 140, 140, 100), m_outlineColor, m_outlineWidth);
+        drawStyledText(painter, &nextLine, nextLine.text, QPointF(midX, midY + m_fontSize * 2.0), upcomingFont, QColor(140, 140, 140, 100), m_outlineColor, m_outlineWidth);
     }
 }
 
@@ -626,7 +620,7 @@ void KaraokeLyricRenderer::renderCinematicFullScreen(QPainter* painter)
     font.setStyleHint(QFont::Serif);
 
     if (m_cachedLines.isEmpty()) {
-        drawStyledText(painter, "(Waiting for lyric cues)", QPointF(midX, midY), font, QColor(128, 128, 128, 128), m_outlineColor, m_outlineWidth);
+        drawStyledText(painter, nullptr, "(Waiting for lyric cues)", QPointF(midX, midY), font, QColor(128, 128, 128, 128), m_outlineColor, m_outlineWidth);
         return;
     }
 
@@ -669,7 +663,6 @@ void KaraokeLyricRenderer::renderCinematicFullScreen(QPainter* painter)
     int prevIdx = focusIdx - 1;
     if (prevIdx >= 0) {
         CachedLine& line = m_cachedLines[prevIdx];
-        validateLineLayouts(line, font);
 
         // Previous animates upwards and fades out
         qreal fromY = midY - spacing;
@@ -689,14 +682,13 @@ void KaraokeLyricRenderer::renderCinematicFullScreen(QPainter* painter)
         painter->scale(scale, scale);
         
         QColor fill = QColor(200, 200, 200, static_cast<int>(opacity * 255));
-        drawStyledText(painter, line.text, QPointF(0, 0), font, fill, m_outlineColor, m_outlineWidth);
+        drawStyledText(painter, &line, line.text, QPointF(0, 0), font, fill, m_outlineColor, m_outlineWidth);
         painter->restore();
     }
 
     // Show Current focused lyric
     if (focusIdx >= 0 && focusIdx < m_cachedLines.size()) {
         CachedLine& line = m_cachedLines[focusIdx];
-        validateLineLayouts(line, font);
 
         // Animates from upcoming position to center focus
         qreal fromY = midY + spacing;
@@ -717,7 +709,7 @@ void KaraokeLyricRenderer::renderCinematicFullScreen(QPainter* painter)
 
         // Bright white active fill with subtle glow
         QColor fill = QColor(255, 255, 255, static_cast<int>(opacity * 255));
-        drawStyledText(painter, line.text, QPointF(0, 0), font, fill, m_outlineColor, m_outlineWidth);
+        drawStyledText(painter, &line, line.text, QPointF(0, 0), font, fill, m_outlineColor, m_outlineWidth);
         painter->restore();
     }
 
@@ -725,7 +717,6 @@ void KaraokeLyricRenderer::renderCinematicFullScreen(QPainter* painter)
     int nextIdx = focusIdx + 1;
     if (nextIdx < m_cachedLines.size()) {
         CachedLine& line = m_cachedLines[nextIdx];
-        validateLineLayouts(line, font);
 
         // Upcoming animates to center or slides into queue
         qreal fromY = midY + spacing * 2.0;
@@ -745,7 +736,7 @@ void KaraokeLyricRenderer::renderCinematicFullScreen(QPainter* painter)
         painter->scale(scale, scale);
 
         QColor fill = QColor(180, 180, 180, static_cast<int>(opacity * 255));
-        drawStyledText(painter, line.text, QPointF(0, 0), font, fill, m_outlineColor, m_outlineWidth);
+        drawStyledText(painter, &line, line.text, QPointF(0, 0), font, fill, m_outlineColor, m_outlineWidth);
         painter->restore();
     }
 }
@@ -778,78 +769,38 @@ void KaraokeLyricRenderer::drawVignette(QPainter* painter)
 // Styled Text Painter (Handles font, alignments, colors & precise vector outlines)
 // ─────────────────────────────────────────────────────────────────────────────
 
-void KaraokeLyricRenderer::drawStyledText(QPainter* painter, const QString& text, const QPointF& pos, const QFont& font, const QColor& fill, const QColor& outline, int outlineWidth, int alignFlags)
+const KaraokeLyricRenderer::RenderCache& KaraokeLyricRenderer::CachedLine::getCache(const QFont& font) const
 {
-    painter->save();
-    painter->setFont(font);
-    painter->setRenderHint(QPainter::TextAntialiasing, true);
-
-    // Compute text bounds and align position
+    for (const auto& cache : caches) {
+        if (cache.font == font) {
+            return cache;
+        }
+    }
+    
+    // Create new cache
+    RenderCache newCache;
+    newCache.font = font;
+    
+    // Perform text layout metrics calculation
     QFontMetricsF fm(font);
-    qreal textWidth = fm.horizontalAdvance(text);
-    qreal textHeight = fm.height();
-    qreal ascent = fm.ascent();
-
-    QPointF textPos = pos;
-    if (alignFlags & Qt::AlignHCenter) {
-        textPos.setX(pos.x() - textWidth / 2.0);
-    } else if (alignFlags & Qt::AlignRight) {
-        textPos.setX(pos.x() - textWidth);
-    }
-
-    if (alignFlags & Qt::AlignVCenter) {
-        textPos.setY(pos.y() - textHeight / 2.0 + ascent);
-    } else if (alignFlags & Qt::AlignBottom) {
-        textPos.setY(pos.y() - textHeight + ascent);
-    } else {
-        // Default relative to baseline
-        textPos.setY(pos.y() + ascent - textHeight / 2.0);
-    }
-
-    // If outline width is set, draw outline using QPainterPath for professional vectors
-    if (outlineWidth > 0) {
-        QPainterPath path;
-        path.addText(textPos, font, text);
-
-        QPen pen(outline, outlineWidth * 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
-        painter->strokePath(path, pen);
-        painter->fillPath(path, fill);
-    } else {
-        // Draw plain text directly
-        painter->setPen(fill);
-        painter->drawText(textPos, text);
-    }
-
-    painter->restore();
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// QTextLayout / Metrics calculations
-// ─────────────────────────────────────────────────────────────────────────────
-
-void KaraokeLyricRenderer::validateLineLayouts(CachedLine& line, const QFont& font)
-{
-    if (line.layoutsValid) return;
-
-    QFontMetricsF fm(font);
-    line.totalHeight = fm.height();
-    line.totalWidth = fm.horizontalAdvance(line.text);
-
-    // Calculate word character positions & boundary offsets
-    if (!line.cachedWords.isEmpty()) {
-        QTextLayout layout(line.text, font);
+    newCache.totalHeight = fm.height();
+    newCache.totalWidth = fm.horizontalAdvance(text);
+    
+    if (!cachedWords.isEmpty()) {
+        newCache.cachedWords = cachedWords;
+        QTextLayout layout(text, font);
         layout.beginLayout();
         QTextLine textLine = layout.createLine();
         layout.endLayout();
-
+        
         if (textLine.isValid()) {
             int charIndex = 0;
-            for (auto& word : line.cachedWords) {
-                int startPos = line.text.indexOf(word.text, charIndex);
+            for (auto& word : newCache.cachedWords) {
+                int startPos = text.indexOf(word.text, charIndex);
                 if (startPos == -1) startPos = charIndex;
                 int endPos = startPos + word.text.length();
                 charIndex = endPos;
-
+                
                 int pos = startPos;
                 word.leftX = textLine.cursorToX(&pos);
                 pos = endPos;
@@ -857,8 +808,138 @@ void KaraokeLyricRenderer::validateLineLayouts(CachedLine& line, const QFont& fo
             }
         }
     }
+    
+    caches.append(newCache);
+    return caches.last();
+}
 
-    line.layoutsValid = true;
+QImage KaraokeLyricRenderer::generateTextImage(const QString& text, const QFont& font, const QColor& fill, const QColor& outline, int outlineWidth, qreal totalWidth, qreal totalHeight)
+{
+    QFontMetricsF fm(font);
+    qreal ascent = fm.ascent();
+    
+    int imgWidth = static_cast<int>(std::ceil(totalWidth + outlineWidth * 2.0 + 10.0));
+    int imgHeight = static_cast<int>(std::ceil(totalHeight + outlineWidth * 2.0 + 10.0));
+    
+    if (imgWidth <= 0 || imgHeight <= 0) {
+        return QImage();
+    }
+    
+    QImage img(imgWidth, imgHeight, QImage::Format_ARGB32_Premultiplied);
+    img.fill(Qt::transparent);
+    
+    QPainter painter(&img);
+    painter.setFont(font);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::TextAntialiasing, true);
+    
+    QPointF textPos(outlineWidth + 5.0, ascent + outlineWidth + 5.0);
+    
+    if (outlineWidth > 0) {
+        QPainterPath path;
+        path.addText(textPos, font, text);
+        
+        QPen pen(outline, outlineWidth * 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        painter.strokePath(path, pen);
+        painter.fillPath(path, fill);
+    } else {
+        painter.setPen(fill);
+        painter.drawText(textPos, text);
+    }
+    
+    return img;
+}
+
+void KaraokeLyricRenderer::drawStyledText(QPainter* painter, CachedLine* line, const QString& text, const QPointF& pos, const QFont& font, const QColor& fill, const QColor& outline, int outlineWidth, int alignFlags)
+{
+    if (!painter) return;
+
+    if (!line) {
+        painter->save();
+        painter->setFont(font);
+        painter->setRenderHint(QPainter::TextAntialiasing, true);
+
+        QFontMetricsF fm(font);
+        qreal textWidth = fm.horizontalAdvance(text);
+        qreal textHeight = fm.height();
+        qreal ascent = fm.ascent();
+
+        QPointF textPos = pos;
+        if (alignFlags & Qt::AlignHCenter) {
+            textPos.setX(pos.x() - textWidth / 2.0);
+        } else if (alignFlags & Qt::AlignRight) {
+            textPos.setX(pos.x() - textWidth);
+        }
+
+        if (alignFlags & Qt::AlignVCenter) {
+            textPos.setY(pos.y() - textHeight / 2.0 + ascent);
+        } else if (alignFlags & Qt::AlignBottom) {
+            textPos.setY(pos.y() - textHeight + ascent);
+        } else {
+            textPos.setY(pos.y() + ascent - textHeight / 2.0);
+        }
+
+        if (outlineWidth > 0) {
+            QPainterPath path;
+            path.addText(textPos, font, text);
+            QPen pen(outline, outlineWidth * 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+            painter->strokePath(path, pen);
+            painter->fillPath(path, fill);
+        } else {
+            painter->setPen(fill);
+            painter->drawText(textPos, text);
+        }
+        painter->restore();
+        return;
+    }
+
+    const RenderCache& cache = line->getCache(font);
+    QRgb fillKey = fill.rgb();
+    
+    QImage img;
+    auto it = cache.images.find(fillKey);
+    if (it != cache.images.end()) {
+        img = *it;
+    } else {
+        QColor solidFill = fill;
+        solidFill.setAlpha(255);
+        img = generateTextImage(text, font, solidFill, outline, outlineWidth, cache.totalWidth, cache.totalHeight);
+        cache.images.insert(fillKey, img);
+    }
+    
+    if (img.isNull()) return;
+    
+    painter->save();
+    
+    QFontMetricsF fm(font);
+    qreal textWidth = cache.totalWidth;
+    qreal textHeight = cache.totalHeight;
+    qreal ascent = fm.ascent();
+    
+    QPointF textPos = pos;
+    if (alignFlags & Qt::AlignHCenter) {
+        textPos.setX(pos.x() - textWidth / 2.0);
+    } else if (alignFlags & Qt::AlignRight) {
+        textPos.setX(pos.x() - textWidth);
+    }
+    
+    if (alignFlags & Qt::AlignVCenter) {
+        textPos.setY(pos.y() - textHeight / 2.0 + ascent);
+    } else if (alignFlags & Qt::AlignBottom) {
+        textPos.setY(pos.y() - textHeight + ascent);
+    } else {
+        textPos.setY(pos.y() + ascent - textHeight / 2.0);
+    }
+    
+    QPointF imgPos = textPos + QPointF(-outlineWidth - 5.0, -ascent - outlineWidth - 5.0);
+    
+    if (fill.alpha() < 255) {
+        painter->setOpacity(painter->opacity() * fill.alphaF());
+    }
+    
+    painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
+    painter->drawImage(imgPos, img);
+    painter->restore();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

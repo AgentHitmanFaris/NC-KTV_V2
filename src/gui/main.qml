@@ -30,6 +30,8 @@ ApplicationWindow {
     // Active project path tracking
     property string currentProjectPath: ""
     property bool closeRequested: false
+    property string pendingAction: ""
+    property real timelineTopY: 0
 
     // Optimized preview rendering cache properties
     property var cachedActiveClip: null
@@ -346,6 +348,7 @@ ApplicationWindow {
         if (timelineManager.isDirty) {
             close.accepted = false;
             closeRequested = true;
+            pendingAction = "Close";
             unsavedChangesDialog.open();
         }
     }
@@ -614,8 +617,8 @@ ApplicationWindow {
             if (rootWindow.activeVideoClip) {
                 var seekPosMs = (timelineManager.currentPlayheadTime - rootWindow.activeVideoClip.startTime + rootWindow.activeVideoClip.sourceStart) / 1000;
                 if (audioEngine.isPlaying || lyricsPreviewTimer.running) {
-                    // Seek video player only when there is a significant jump or drift (e.g. > 250 ms)
-                    if (Math.abs(videoPlayer.position - seekPosMs) > 250.0) {
+                    // Seek video player only when there is a significant jump or drift (e.g. > 1000 ms)
+                    if (Math.abs(videoPlayer.position - seekPosMs) > 1000.0) {
                         videoPlayer.position = Math.max(0, seekPosMs);
                     }
                 } else {
@@ -637,6 +640,28 @@ ApplicationWindow {
             rootWindow.lastPlayheadTime = -1;
             rootWindow.updateCachedClips();
         }
+
+        function onTimelineChanged() {
+            rootWindow.lastPlayheadTime = -1;
+            rootWindow.updateCachedClips();
+        }
+    }
+
+    function executePendingAction() {
+        console.log("[PROJECT ACTION] Executing pending project action: " + pendingAction);
+        if (pendingAction === "New") {
+            timelineManager.clearProject();
+            currentProjectPath = "";
+            propertiesPanel.selectedTrack = null;
+            propertiesPanel.selectedClip = null;
+            saveStatusText.text = "New Project Started";
+            saveTextAnim.start();
+        } else if (pendingAction === "Open") {
+            openFileDialog.open();
+        } else if (pendingAction === "Close") {
+            Qt.quit();
+        }
+        pendingAction = "";
     }
 
 
@@ -1063,12 +1088,7 @@ ApplicationWindow {
                         height: 12
                         radius: 6
                         color: rootWindow.colorAccentViolet
-                        
-                        SequentialAnimation on opacity {
-                            loops: Animation.Infinite
-                            NumberAnimation { from: 1.0; to: 0.4; duration: 1500; easing.type: Easing.InOutQuad }
-                            NumberAnimation { from: 0.4; to: 1.0; duration: 1500; easing.type: Easing.InOutQuad }
-                        }
+                        opacity: 0.7
                     }
                     Label {
                         text: "NC-KTV"
@@ -1315,6 +1335,37 @@ ApplicationWindow {
                     }
 
                     Button {
+                        id: btnNew
+                        text: "New Project"
+                        onClicked: {
+                            if (timelineManager.isDirty) {
+                                pendingAction = "New";
+                                unsavedChangesDialog.open();
+                            } else {
+                                timelineManager.clearProject();
+                                currentProjectPath = "";
+                                propertiesPanel.selectedTrack = null;
+                                propertiesPanel.selectedClip = null;
+                                saveStatusText.text = "New Project Started";
+                                saveTextAnim.start();
+                            }
+                        }
+                        contentItem: Text {
+                            text: btnNew.text
+                            color: rootWindow.colorTextPrimary
+                            font.bold: true
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            color: btnNew.hovered ? rootWindow.colorAccentViolet : "#1B1B22"
+                            radius: 4
+                            border.color: rootWindow.colorBorder
+                            border.width: 1
+                        }
+                    }
+
+                    Button {
                         id: btnSave
                         text: "Save Project"
                         onClicked: {
@@ -1345,7 +1396,12 @@ ApplicationWindow {
                         id: btnLoad
                         text: "Load Project"
                         onClicked: {
-                            openFileDialog.open();
+                            if (timelineManager.isDirty) {
+                                pendingAction = "Open";
+                                unsavedChangesDialog.open();
+                            } else {
+                                openFileDialog.open();
+                            }
                         }
                         contentItem: Text {
                             text: btnLoad.text
@@ -1413,6 +1469,7 @@ ApplicationWindow {
                 // Media Library
                 MediaBrowser {
                     id: mediaBrowser
+                    height: parent.height
                     SplitView.preferredWidth: 420
                     SplitView.minimumWidth: 250
                 }
@@ -1452,6 +1509,8 @@ ApplicationWindow {
                             anchors.bottomMargin: 80
                             visible: rootWindow.sourceMonitorFilePath !== "" && rootWindow.sourceMonitorFileType === "Audio"
                             
+                            property double timePhase: 0.0
+                            
                             onPaint: {
                                 var ctx = getContext("2d");
                                 ctx.clearRect(0, 0, width, height);
@@ -1462,17 +1521,21 @@ ApplicationWindow {
                                 var centerY = height / 2;
                                 ctx.moveTo(0, centerY);
                                 for (var i = 0; i < width; i += 4) {
-                                    var wave = Math.sin(i * 0.05) * Math.cos(i * 0.02) * (rootWindow.sourceMonitorIsPlaying ? (30 + Math.random() * 20) : 15);
+                                    var amp = rootWindow.sourceMonitorIsPlaying ? 40 : 15;
+                                    var wave = Math.sin(i * 0.05 + timePhase) * Math.cos(i * 0.02 + timePhase * 0.7) * amp;
                                     ctx.lineTo(i, centerY + wave);
                                 }
                                 ctx.stroke();
                             }
 
                             Timer {
-                                interval: 33
-                                running: rootWindow.sourceMonitorIsPlaying
+                                interval: 50
+                                running: rootWindow.sourceMonitorIsPlaying && sourceVisualizerCanvas.visible
                                 repeat: true
-                                onTriggered: sourceVisualizerCanvas.requestPaint()
+                                onTriggered: {
+                                    sourceVisualizerCanvas.timePhase += 0.2;
+                                    sourceVisualizerCanvas.requestPaint();
+                                }
                             }
                         }
 
@@ -1781,6 +1844,7 @@ ApplicationWindow {
                             Behavior on opacity { NumberAnimation { duration: 500 } }
                             
                             property double timeVar: 0.0
+                            property bool gridPainted: false
                             
                             onPaint: {
                                 var ctx = getContext("2d");
@@ -1788,8 +1852,9 @@ ApplicationWindow {
                                 
                                 if (audioEngine.isPlaying) {
                                     timeVar += 0.15;
+                                    gridPainted = false;
                                 } else {
-                                    // Draw a beautiful grid design when stopped
+                                    // Draw a beautiful grid design when stopped (only once)
                                     ctx.strokeStyle = "#1A1A26";
                                     ctx.lineWidth = 1;
                                     var size = 20;
@@ -1799,10 +1864,11 @@ ApplicationWindow {
                                     for(var y = 0; y < height; y += size) {
                                         ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke();
                                     }
+                                    gridPainted = true;
                                     return;
                                 }
                                 
-                                // Neon wave drawing
+                                // Neon wave drawing — deterministic (no Math.random)
                                 var gradient = ctx.createLinearGradient(0, 0, width, 0);
                                 gradient.addColorStop(0.0, rootWindow.colorAccentViolet);
                                 gradient.addColorStop(0.5, "#00E5FF");
@@ -1817,7 +1883,7 @@ ApplicationWindow {
                                 for (var i = 0; i < width; i += 5) {
                                     var angle = (i / width) * Math.PI * 4 + timeVar;
                                     var waveVal = Math.sin(angle) * Math.cos(angle * 0.5) * 45;
-                                    waveVal += (Math.random() - 0.5) * 4;
+                                    waveVal += Math.sin(angle * 3.7 + timeVar * 2.3) * 2;
                                     
                                     if (i === 0) {
                                         ctx.moveTo(i, centerY + waveVal);
@@ -2057,13 +2123,6 @@ ApplicationWindow {
                                     radius: width / 2
                                     color: "#7C4DFF"
                                     opacity: 0.05
-                                    layer.enabled: true
-                                    
-                                    SequentialAnimation on opacity {
-                                        loops: Animation.Infinite
-                                        NumberAnimation { from: 0.03; to: 0.08; duration: 2500; easing.type: Easing.InOutQuad }
-                                        NumberAnimation { from: 0.08; to: 0.03; duration: 2500; easing.type: Easing.InOutQuad }
-                                    }
                                 }
                             }
 
@@ -2219,6 +2278,8 @@ ApplicationWindow {
 
                             function startIntro() {
                                 introAnimationSequence.stop();
+                                titleLabel.text = timelineManager.songTitle !== "" ? timelineManager.songTitle : "Untitled Song";
+                                artistLabel.text = timelineManager.artistName !== "" ? timelineManager.artistName : "Unknown Artist";
                                 brandingLabel.opacity = 0.0;
                                 brandingLabel.scale = 0.8;
                                 titleLabel.opacity = 0.0;
@@ -2254,7 +2315,7 @@ ApplicationWindow {
                 // Properties Panel Inspector
                 PropertiesPanel {
                     id: propertiesPanel
-                    timelineManager: timelineManager
+                    height: parent.height
                     SplitView.preferredWidth: 420
                     SplitView.minimumWidth: 250
                 }
@@ -2265,6 +2326,15 @@ ApplicationWindow {
                 id: timelineView
                 SplitView.preferredHeight: 300
                 SplitView.minimumHeight: 180
+
+                onYChanged: {
+                    var pt = mapToItem(rootWindow.contentItem, 0, 0);
+                    rootWindow.timelineTopY = pt ? pt.y : 0;
+                }
+                Component.onCompleted: {
+                    var pt = mapToItem(rootWindow.contentItem, 0, 0);
+                    rootWindow.timelineTopY = pt ? pt.y : 0;
+                }
             }
         }
     }
@@ -2294,17 +2364,19 @@ ApplicationWindow {
             if (timelineManager.saveProject(path)) {
                 currentProjectPath = path;
                 saveStatusText.text = "Project Saved!";
-                if (closeRequested) {
-                    Qt.quit();
+                if (closeRequested || pendingAction !== "") {
+                    executePendingAction();
                 }
             } else {
                 saveStatusText.text = "Save Failed";
                 closeRequested = false;
+                pendingAction = "";
             }
             saveTextAnim.start();
         }
         onRejected: {
             closeRequested = false;
+            pendingAction = "";
         }
     }
 
@@ -2538,7 +2610,15 @@ ApplicationWindow {
             anchors.margins: 15
 
             Label {
-                text: "You have unsaved changes in your project. Do you want to save them before closing?"
+                text: {
+                    if (pendingAction === "New") {
+                        return "You have unsaved changes in your project. Do you want to save them before starting a new project?";
+                    } else if (pendingAction === "Open") {
+                        return "You have unsaved changes in your project. Do you want to save them before loading another project?";
+                    } else {
+                        return "You have unsaved changes in your project. Do you want to save them before closing?";
+                    }
+                }
                 color: rootWindow.colorTextPrimary
                 font.pixelSize: 16
                 wrapMode: Text.WordWrap
@@ -2558,7 +2638,7 @@ ApplicationWindow {
                         unsavedChangesDialog.close();
                         if (currentProjectPath !== "") {
                             if (timelineManager.saveProject(currentProjectPath)) {
-                                Qt.quit();
+                                executePendingAction();
                             }
                         } else {
                             saveFileDialog.open();
@@ -2586,7 +2666,7 @@ ApplicationWindow {
                     onClicked: {
                         unsavedChangesDialog.close();
                         timelineManager.setDirty(false);
-                        Qt.quit();
+                        executePendingAction();
                     }
                     background: Rectangle {
                         color: btnDiscardUnsaved.hovered ? "#EF5350" : "#C62828"
@@ -2610,6 +2690,7 @@ ApplicationWindow {
                     onClicked: {
                         unsavedChangesDialog.close();
                         closeRequested = false;
+                        pendingAction = "";
                     }
                     background: Rectangle {
                         color: btnCancelUnsaved.hovered ? "#3E3E4D" : "#2C2C35"
@@ -3016,7 +3097,7 @@ ApplicationWindow {
     DropArea {
         id: globalDropArea
         anchors.top: parent.top
-        anchors.bottom: timelineView.top
+        height: rootWindow.timelineTopY
         anchors.left: parent.left
         anchors.right: parent.right
         keys: ["text/uri-list"]
@@ -3062,7 +3143,7 @@ ApplicationWindow {
     // Glassmorphic drop overlay visual cue
     Rectangle {
         anchors.top: parent.top
-        anchors.bottom: timelineView.top
+        height: rootWindow.timelineTopY
         anchors.left: parent.left
         anchors.right: parent.right
         color: "#E6090710"

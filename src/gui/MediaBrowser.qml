@@ -327,10 +327,7 @@ Rectangle {
         if (track) {
             // Auto-clear existing clips on the matched lyrics track to prevent cluttering
             if (!track.isLocked) {
-                var clips = track.clips();
-                for (var c = clips.length - 1; c >= 0; --c) {
-                    track.removeClip(clips[c].clipId);
-                }
+                track.clearClips();
             }
             
             var success = timelineManager.importLyricsFromString(track.trackId, lrcText);
