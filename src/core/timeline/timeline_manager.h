@@ -5,6 +5,7 @@
 #include <QMap>
 #include <QVariantList>
 #include "track.h"
+#include "lyric_engine.h"
 #include "models/track_list_model.h"
 #include "models/clip_list_model.h"
 
@@ -26,6 +27,11 @@ class TimelineManager : public QObject {
     Q_PROPERTY(int subtitleOutlineWidth READ subtitleOutlineWidth WRITE setSubtitleOutlineWidth NOTIFY subtitleOutlineWidthChanged)
 
 
+    Q_PROPERTY(QString songTitle READ songTitle WRITE setSongTitle NOTIFY songTitleChanged)
+    Q_PROPERTY(QString artistName READ artistName WRITE setArtistName NOTIFY artistNameChanged)
+    Q_PROPERTY(int introSplashDuration READ introSplashDuration WRITE setIntroSplashDuration NOTIFY introSplashDurationChanged)
+    Q_PROPERTY(QString endingVideoPath READ endingVideoPath WRITE setEndingVideoPath NOTIFY endingVideoPathChanged)
+
     Q_PROPERTY(qint64 currentPlayheadTime READ currentPlayheadTime WRITE setCurrentPlayheadTime NOTIFY currentPlayheadTimeChanged)
     Q_PROPERTY(qint64 totalDuration READ totalDuration WRITE setTotalDuration NOTIFY totalDurationChanged)
     Q_PROPERTY(double fps READ fps WRITE setFps NOTIFY fpsChanged)
@@ -40,10 +46,21 @@ class TimelineManager : public QObject {
     Q_PROPERTY(QStringList discoveredModels READ discoveredModels NOTIFY discoveredModelsChanged)
     Q_PROPERTY(QStringList discoveredModelPaths READ discoveredModelPaths NOTIFY discoveredModelsChanged)
     Q_PROPERTY(QString modelsDirPath READ modelsDirPath WRITE setModelsDirPath NOTIFY modelsDirPathChanged)
+    Q_PROPERTY(bool showVideoBackground READ showVideoBackground WRITE setShowVideoBackground NOTIFY showVideoBackgroundChanged)
+    Q_PROPERTY(bool lyricsOnlyMode READ lyricsOnlyMode WRITE setLyricsOnlyMode NOTIFY lyricDisplayModeChanged)
+    Q_PROPERTY(int lyricDisplayMode READ lyricDisplayMode WRITE setLyricDisplayMode NOTIFY lyricDisplayModeChanged)
+    Q_PROPERTY(int exportAudioMode READ exportAudioMode WRITE setExportAudioMode NOTIFY exportAudioModeChanged)
+    Q_PROPERTY(bool showSourceMonitor READ showSourceMonitor WRITE setShowSourceMonitor NOTIFY showSourceMonitorChanged)
+    Q_PROPERTY(LyricEngine* lyricEngine READ lyricEngine CONSTANT)
+    Q_PROPERTY(bool disableHwDecoding READ disableHwDecoding WRITE setDisableHwDecoding NOTIFY disableHwDecodingChanged)
 
 public:
     explicit TimelineManager(QObject* parent = nullptr);
     virtual ~TimelineManager() override;
+
+    Q_INVOKABLE [[nodiscard]] bool disableHwDecoding() const;
+    Q_INVOKABLE void setDisableHwDecoding(bool disable);
+    Q_INVOKABLE void restartApplication();
 
     [[nodiscard]] QString modelPath() const { return m_modelPath; }
     void setModelPath(const QString& path);
@@ -97,6 +114,38 @@ public:
     Q_INVOKABLE void removeMarker(const QString& markerId);
     Q_INVOKABLE void updateMarker(const QString& markerId, const QString& name, const QString& color);
 
+    [[nodiscard]] bool showVideoBackground() const { return m_showVideoBackground; }
+    void setShowVideoBackground(bool show);
+
+    // Backward-compatible computed getter (true when displayMode == CenterScrollQueue)
+    [[nodiscard]] bool lyricsOnlyMode() const { return m_lyricDisplayMode == 1; }
+    void setLyricsOnlyMode(bool only); // Legacy setter for QML/render compatibility
+
+    [[nodiscard]] int lyricDisplayMode() const { return m_lyricDisplayMode; }
+    void setLyricDisplayMode(int mode);
+
+    [[nodiscard]] LyricEngine* lyricEngine() const { return m_lyricEngine; }
+
+    [[nodiscard]] int exportAudioMode() const { return m_exportAudioMode; }
+    void setExportAudioMode(int mode);
+
+    [[nodiscard]] bool showSourceMonitor() const { return m_showSourceMonitor; }
+    void setShowSourceMonitor(bool show);
+
+    [[nodiscard]] QString songTitle() const { return m_songTitle; }
+    void setSongTitle(const QString& title);
+
+    [[nodiscard]] QString artistName() const { return m_artistName; }
+    void setArtistName(const QString& name);
+
+    [[nodiscard]] int introSplashDuration() const { return m_introSplashDuration; }
+    void setIntroSplashDuration(int durationMs);
+
+    [[nodiscard]] QString endingVideoPath() const { return m_endingVideoPath; }
+    void setEndingVideoPath(const QString& path);
+
+    Q_INVOKABLE [[nodiscard]] QString resolveEndingVideoPath() const;
+
 
     [[nodiscard]] qint64 currentPlayheadTime() const { return m_currentPlayheadTime; }
     void setCurrentPlayheadTime(qint64 timeMicroseconds);
@@ -116,12 +165,18 @@ public:
 
     // Timeline Operations
     Q_INVOKABLE bool addClipToTrack(const QString& trackId, const QString& clipId, int type, qint64 startTime, qint64 duration, const QString& sourceFile = "", const QString& lyricText = "");
+    Q_INVOKABLE bool addClipToTrackWithSourceStart(const QString& trackId, const QString& clipId, int type, qint64 startTime, qint64 duration, qint64 sourceStart, const QString& sourceFile = "", const QString& lyricText = "");
     Q_INVOKABLE bool importLyricsFromFile(const QString& trackId, const QString& filePath);
+    Q_INVOKABLE bool importLyricsFromString(const QString& trackId, const QString& rawLrcContent);
     Q_INVOKABLE bool splitClip(const QString& trackId, const QString& clipId, qint64 splitTimeMicroseconds);
     Q_INVOKABLE void separateStems(const QString& clipId);
     Q_INVOKABLE void separateStemsForFile(const QString& filePath);
     Q_INVOKABLE void startExport(const QString& outputPath, int width, int height, int fps, int videoBitrate, int audioBitrate);
     Q_INVOKABLE void cancelExport();
+    
+    // Romanization
+    Q_INVOKABLE [[nodiscard]] QString romanizeText(const QString& text) const;
+    Q_INVOKABLE void romanizeClip(QObject* clipObj);
     
     // Snapping Engine
     Q_INVOKABLE qint64 checkSnapping(const QString& excludeClipId, qint64 targetTimeMicroseconds, qint64 thresholdMicroseconds) const;
@@ -169,6 +224,15 @@ signals:
     void subtitleOutlineColorChanged();
     void subtitleOutlineWidthChanged();
     void markersChanged();
+    void showVideoBackgroundChanged();
+    void lyricDisplayModeChanged();
+    void exportAudioModeChanged();
+    void showSourceMonitorChanged();
+    void songTitleChanged();
+    void artistNameChanged();
+    void introSplashDurationChanged();
+    void endingVideoPathChanged();
+    void disableHwDecodingChanged();
 
 
 private slots:
@@ -215,6 +279,17 @@ private:
     QString m_subtitleActiveColor = "#00E676";
     QString m_subtitleOutlineColor = "#08080A";
     int m_subtitleOutlineWidth = 2;
+
+    bool m_showVideoBackground = true;
+    int m_lyricDisplayMode = 0; // 0=BottomTwoLine, 1=CenterScroll, 2=WordBounce, 3=Cinematic
+    int m_exportAudioMode = 0; // 0 = Full, 1 = Instrumental Only
+    bool m_showSourceMonitor = true;
+    LyricEngine* m_lyricEngine = nullptr;
+
+    QString m_songTitle = "Untitled Song";
+    QString m_artistName = "Unknown Artist";
+    int m_introSplashDuration = 3000;
+    QString m_endingVideoPath = "splash_screen/end.mp4";
 };
 
 

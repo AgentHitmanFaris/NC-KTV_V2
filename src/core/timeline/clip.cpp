@@ -1,4 +1,5 @@
 #include "clip.h"
+#include "romanizer.h"
 #include <QUuid>
 #include <algorithm>
 #include <QStringList>
@@ -189,6 +190,27 @@ void Clip::updateSyllable(int index, qint64 relativeStart, qint64 duration) {
         m_syllables[index] = syl;
         emit syllablesChanged();
     }
+}
+
+void Clip::romanize() {
+    if (m_clipType != Lyrics) return;
+    
+    QVariantList newSylList;
+    QString cleanText;
+    for (const QVariant& s : m_syllables) {
+        QVariantMap map = s.toMap();
+        QString oldText = map["text"].toString();
+        QString newText = Romanizer::romanize(oldText);
+        map["text"] = newText;
+        newSylList.append(map);
+        cleanText.append(newText);
+    }
+    
+    m_syllables = newSylList;
+    m_lyricText = cleanText;
+    
+    emit lyricTextChanged();
+    emit syllablesChanged();
 }
 
 void Clip::autoGenerateSyllables() {

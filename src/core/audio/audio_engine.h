@@ -3,7 +3,9 @@
 #include <QObject>
 #include <QMap>
 #include <QTimer>
+#include <QSet>
 #include <atomic>
+#include <mutex>
 #include "audio_reader.h"
 #include "../timeline/timeline_manager.h"
 #include <miniaudio.h>
@@ -39,8 +41,12 @@ public:
     // Returns loaded reader or nullptr
     Q_INVOKABLE ncktv::AudioReader* getReader(const QString& filePath) const;
 
+    // Callback from background thread
+    Q_INVOKABLE void onFileDecoded(const QString& filePath, void* readerPtr, bool success);
+
     // For unit testing mixing and gain smoothing
     void setCachedReaderForTesting(const QString& filePath, AudioReader* reader) {
+        std::lock_guard<std::mutex> lock(m_cacheMutex);
         if (m_audioCache.contains(filePath)) {
             delete m_audioCache.take(filePath);
         }
@@ -49,7 +55,7 @@ public:
 
     // Real-time mixing callback (thread-safe, lock-free, called by miniaudio device)
     void mixAudio(float* pOutput, unsigned int frameCount);
-    void mixOffline(float* pOutput, unsigned int frameCount, qint64 startSample);
+    void mixOffline(float* pOutput, unsigned int frameCount, qint64 startSample, bool excludeVocals = false);
 
 signals:
     void isPlayingChanged();
@@ -73,13 +79,16 @@ private:
     
     QTimer* m_syncTimer = nullptr;
     
-    // Decoded audio cache
+    // Decoded audio cache and thread-safety
+    mutable std::mutex m_cacheMutex;
     QMap<QString, AudioReader*> m_audioCache;
+    QSet<QString> m_loadingFiles;
 
     // Tracks volume state map for smoothing
     QMap<QString, float> m_prevVolumes;
 
     float m_masterVolume = 1.0f;
+    bool m_isUpdatingPlayheadFromAudio = false;
 };
 
 } // namespace ncktv

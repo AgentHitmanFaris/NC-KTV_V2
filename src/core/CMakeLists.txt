@@ -6,6 +6,8 @@ set(CORE_SOURCES
     timeline/clip.cpp
     timeline/track.cpp
     timeline/timeline_manager.cpp
+    timeline/lyric_engine.cpp
+    timeline/romanizer.cpp
     timeline/models/track_list_model.cpp
     timeline/models/clip_list_model.cpp
     audio/audio_reader.cpp
@@ -15,12 +17,15 @@ set(CORE_SOURCES
     audio/stem_separation_worker.cpp
     audio/render_engine.cpp
     audio/render_worker.cpp
+    youtube/youtube_manager.cpp
 )
 
 set(CORE_HEADERS
     timeline/clip.h
     timeline/track.h
     timeline/timeline_manager.h
+    timeline/lyric_engine.h
+    timeline/romanizer.h
     timeline/models/track_list_model.h
     timeline/models/clip_list_model.h
     audio/audio_reader.h
@@ -30,6 +35,7 @@ set(CORE_HEADERS
     audio/stem_separation_worker.h
     audio/render_engine.h
     audio/render_worker.h
+    youtube/youtube_manager.h
 )
 
 add_library(ncktv_core STATIC ${CORE_SOURCES} ${CORE_HEADERS})

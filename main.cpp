@@ -10,6 +10,7 @@
 #include <QIcon>
 #include <QQuickStyle>
 #include <QFile>
+#include <QSettings>
 
 
 // External thirdparty & fetched headers (Verifies compiler path resolutions)
@@ -36,9 +37,19 @@ extern "C" {
 #include "timeline/models/track_list_model.h"
 #include "timeline/models/clip_list_model.h"
 #include "audio/audio_engine.h"
+#include "youtube/youtube_manager.h"
 #include "src/gui/waveform_renderer.h"
+#include "src/gui/karaoke_lyric_renderer.h"
 
 int main(int argc, char* argv[]) {
+    // Read hardware acceleration setting before QGuiApplication is created
+    QSettings settings("NC-KTV", "NC-KTV_V2");
+    bool disableHw = settings.value("disable_hw_decoding", false).toBool();
+    if (disableHw) {
+        qputenv("QT_FFMPEG_DECODING_HW_DEVICE_TYPES", "none");
+        std::cout << "[SYSTEM] Software Decoding Mode enabled (Hardware acceleration disabled globally).\n";
+    }
+
     // Force Basic style to allow full QML customization and suppress native style warnings
     QQuickStyle::setStyle("Basic");
 
@@ -70,6 +81,7 @@ int main(int argc, char* argv[]) {
     // Initialize core controllers
     ncktv::TimelineManager timelineManager;
     ncktv::AudioEngine audioEngine(&timelineManager);
+    ncktv::YoutubeManager youtubeManager;
 
     // ─── Initialize clean, empty default tracks for a premium blank startup state ───
     timelineManager.addTrack(0, "Background Instrumental");
@@ -83,6 +95,7 @@ int main(int argc, char* argv[]) {
     qmlRegisterType<ncktv::TrackListModel>("ncktv.core", 1, 0, "TrackListModel");
     qmlRegisterType<ncktv::ClipListModel>("ncktv.core", 1, 0, "ClipListModel");
     qmlRegisterType<ncktv::WaveformRenderer>("ncktv.core", 1, 0, "WaveformRenderer");
+    qmlRegisterType<ncktv::KaraokeLyricRenderer>("ncktv.core", 1, 0, "KaraokeLyricRenderer");
     
     // Register Track and Clip pointers as uncreatable to expose meta properties & methods
     qmlRegisterUncreatableType<ncktv::Track>("ncktv.core", 1, 0, "Track", "Track objects are created by C++ core only");
@@ -91,6 +104,7 @@ int main(int argc, char* argv[]) {
     // Bind manager singletons as global context properties for easy QML anchors
     engine.rootContext()->setContextProperty("timelineManager", &timelineManager);
     engine.rootContext()->setContextProperty("audioEngine", &audioEngine);
+    engine.rootContext()->setContextProperty("youtubeManager", &youtubeManager);
 
     // Connect to warning signals to print QML errors clearly in console
     QObject::connect(&engine, &QQmlApplicationEngine::warnings, [](const QList<QQmlError>& warnings) {

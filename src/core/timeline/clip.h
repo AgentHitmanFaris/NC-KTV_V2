@@ -69,6 +69,9 @@ public:
     // Update a single syllable's relative start time and duration
     Q_INVOKABLE void updateSyllable(int index, qint64 relativeStart, qint64 duration);
     
+    // Romanizes the lyric text and syllables in-place
+    Q_INVOKABLE void romanize();
+    
     // Generates word timings evenly spread across the clip's duration
     void autoGenerateSyllables();
 

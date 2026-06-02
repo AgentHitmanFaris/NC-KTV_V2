@@ -42,6 +42,14 @@ private:
     QString m_sourceFile;
     qint64 m_sourceStart = 0; // Microseconds offset inside source file
     qint64 m_duration = 0;    // Microseconds duration of this clip
+
+    // Waveform Cache Properties
+    QImage m_cachedImage;
+    QString m_cachedSourceFile;
+    qint64 m_cachedSourceStart = -1;
+    qint64 m_cachedDuration = -1;
+    double m_cachedWidth = -1.0;
+    double m_cachedHeight = -1.0;
 };
 
 } // namespace ncktv

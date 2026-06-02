@@ -1,4 +1,6 @@
 #include "timeline_manager.h"
+#include "lyric_engine.h"
+#include "romanizer.h"
 #include "../audio/audio_engine.h"
 #include "../audio/stem_separation_worker.h"
 #include "../audio/render_worker.h"
@@ -11,6 +13,8 @@
 #include <QStandardPaths>
 #include <QSettings>
 #include <QDirIterator>
+#include <QCoreApplication>
+#include <QProcess>
 #include <cmath>
 #include <algorithm>
 
@@ -38,6 +42,7 @@ TimelineManager::TimelineManager(QObject* parent)
     QSettings settings("NC-KTV", "NC-KTV_V2");
     m_modelsDirPath = settings.value("modelsDirPath", "").toString();
     m_modelPath = settings.value("modelPath", "").toString();
+    m_showSourceMonitor = settings.value("showSourceMonitor", true).toBool();
 
     if (m_modelsDirPath.isEmpty() || !QDir(m_modelsDirPath).exists()) {
         // Default to standard app local data location (models directory)
@@ -46,6 +51,21 @@ TimelineManager::TimelineManager(QObject* parent)
     }
 
     scanModelsDir();
+
+    // Construct the LyricEngine for centralized lyric synchronization
+    m_lyricEngine = new LyricEngine(this, this);
+
+    // Wire playhead updates to the lyric engine
+    connect(this, &TimelineManager::currentPlayheadTimeChanged, this, [this]() {
+        if (m_lyricEngine)
+            m_lyricEngine->updatePlaybackPosition(m_currentPlayheadTime);
+    });
+
+    // Rebuild lyric cache when tracks/clips change
+    connect(m_trackListModel, &TrackListModel::trackAdded, this, [this](Track* track) {
+        connect(track, &Track::clipsChanged, m_lyricEngine, &LyricEngine::rebuildLineCache);
+        m_lyricEngine->rebuildLineCache();
+    });
 }
 
 TimelineManager::~TimelineManager() {
@@ -68,6 +88,15 @@ void TimelineManager::setModelsDirPath(const QString& path) {
         settings.setValue("modelsDirPath", m_modelsDirPath);
         emit modelsDirPathChanged();
         scanModelsDir();
+    }
+}
+
+void TimelineManager::setShowSourceMonitor(bool show) {
+    if (m_showSourceMonitor != show) {
+        m_showSourceMonitor = show;
+        QSettings settings("NC-KTV", "NC-KTV_V2");
+        settings.setValue("showSourceMonitor", m_showSourceMonitor);
+        emit showSourceMonitorChanged();
     }
 }
 
@@ -256,6 +285,95 @@ void TimelineManager::updateMarker(const QString& markerId, const QString& name,
 }
 
 
+void TimelineManager::setSongTitle(const QString& title) {
+    if (m_songTitle != title) {
+        m_songTitle = title;
+        setIsDirty(true);
+        emit songTitleChanged();
+    }
+}
+
+void TimelineManager::setArtistName(const QString& name) {
+    if (m_artistName != name) {
+        m_artistName = name;
+        setIsDirty(true);
+        emit artistNameChanged();
+    }
+}
+
+void TimelineManager::setIntroSplashDuration(int durationMs) {
+    if (m_introSplashDuration != durationMs) {
+        m_introSplashDuration = durationMs;
+        setIsDirty(true);
+        emit introSplashDurationChanged();
+    }
+}
+
+void TimelineManager::setEndingVideoPath(const QString& path) {
+    if (m_endingVideoPath != path) {
+        m_endingVideoPath = path;
+        setIsDirty(true);
+        emit endingVideoPathChanged();
+    }
+}
+
+QString TimelineManager::resolveEndingVideoPath() const {
+    if (m_endingVideoPath.isEmpty()) {
+        return QString();
+    }
+
+    // 1. Try QRC resource path first if m_endingVideoPath is default or fallback
+    if (m_endingVideoPath == "splash_screen/end.mp4" && QFile::exists(":/ncktv/gui/end.mp4")) {
+        return "qrc:/ncktv/gui/end.mp4";
+    }
+
+    // 2. Try absolute or exact relative path
+    QFileInfo info(m_endingVideoPath);
+    if (info.isAbsolute() && info.exists()) {
+        return m_endingVideoPath;
+    }
+
+    // 3. Try relative to current working directory
+    QString path1 = QDir::current().filePath(m_endingVideoPath);
+    if (QFile::exists(path1)) {
+        return path1;
+    }
+
+    // 4. Try space alternative relative to current working directory if default
+    if (m_endingVideoPath == "splash_screen/end.mp4") {
+        QString spacePath = QDir::current().filePath("splash screen/end.mp4");
+        if (QFile::exists(spacePath)) {
+            return spacePath;
+        }
+    }
+
+    // 5. Try relative to application directory
+    QString path2 = QDir(QCoreApplication::applicationDirPath()).filePath(m_endingVideoPath);
+    if (QFile::exists(path2)) {
+        return path2;
+    }
+    if (m_endingVideoPath == "splash_screen/end.mp4") {
+        QString spacePath = QDir(QCoreApplication::applicationDirPath()).filePath("splash screen/end.mp4");
+        if (QFile::exists(spacePath)) {
+            return spacePath;
+        }
+    }
+
+    // 6. Try absolute fallback path for ending video splash
+    QString fallbackPath = "D:/Document/NC-Project/NC-KTV/NC-KTV_V2/splash screen/end.mp4";
+    if (QFile::exists(fallbackPath)) {
+        return fallbackPath;
+    }
+
+    // 7. General QRC fallback if not found elsewhere
+    if (QFile::exists(":/ncktv/gui/end.mp4")) {
+        return "qrc:/ncktv/gui/end.mp4";
+    }
+
+    return QString(); // Not found
+}
+
+
 QString TimelineManager::addTrack(int type, const QString& name) {
     auto castedType = static_cast<Track::Type>(type);
     Track* track = new Track(QString(), castedType, name, this);
@@ -331,6 +449,59 @@ bool TimelineManager::addClipToTrack(const QString& trackId, const QString& clip
     setIsDirty(true);
     return true;
 }
+
+bool TimelineManager::addClipToTrackWithSourceStart(const QString& trackId, const QString& clipId, int type, qint64 startTime, qint64 duration, qint64 sourceStart, const QString& sourceFile, const QString& lyricText) {
+    Track* track = m_trackListModel->getTrackById(trackId);
+    if (!track || track->isLocked()) {
+        return false;
+    }
+
+    qint64 fullSourceDuration = duration;
+    double secs = 0.0;
+    if ((type == 0 || type == 1) && !sourceFile.isEmpty()) {
+        if (AudioEngine::instance()) {
+            AudioReader* reader = AudioEngine::instance()->getReader(sourceFile);
+            if (reader) {
+                secs = reader->durationSeconds();
+            }
+        }
+        if (secs <= 0.0) {
+            AudioReader tempReader;
+            if (tempReader.decodeFile(sourceFile)) {
+                secs = tempReader.durationSeconds();
+            }
+        }
+        if (secs > 0.0) {
+            fullSourceDuration = static_cast<qint64>(secs * 1000000.0);
+        }
+    }
+
+    qint64 clipDuration = duration;
+    if (clipDuration <= 0) {
+        clipDuration = fullSourceDuration - sourceStart;
+        if (clipDuration <= 0) {
+            clipDuration = 10000000LL; // 10 seconds default fallback
+        }
+    }
+
+    Clip* clip = new Clip(clipId, static_cast<Clip::Type>(type), startTime, clipDuration, track);
+    if (!sourceFile.isEmpty()) {
+        clip->setSourceFile(sourceFile);
+        clip->setSourceStart(sourceStart);
+        clip->setSourceDuration(fullSourceDuration);
+    }
+    if (!lyricText.isEmpty()) {
+        clip->setLyricText(lyricText);
+    }
+
+    if (!track->addClip(clip)) {
+        delete clip;
+        return false;
+    }
+    setIsDirty(true);
+    return true;
+}
+
 
 bool TimelineManager::splitClip(const QString& trackId, const QString& clipId, qint64 splitTimeMicroseconds) {
     Track* track = m_trackListModel->getTrackById(trackId);
@@ -593,6 +764,17 @@ bool TimelineManager::saveProject(const QString& filePath) {
     }
     j["markers"] = markersJson;
 
+    // Save extra options
+    j["showVideoBackground"] = m_showVideoBackground;
+    j["lyricDisplayMode"] = m_lyricDisplayMode;
+    // Legacy key for older readers
+    j["lyricsOnlyMode"] = (m_lyricDisplayMode == 1);
+    j["exportAudioMode"] = m_exportAudioMode;
+    j["songTitle"] = m_songTitle.toStdString();
+    j["artistName"] = m_artistName.toStdString();
+    j["introSplashDuration"] = m_introSplashDuration;
+    j["endingVideoPath"] = m_endingVideoPath.toStdString();
+
     QFile file(filePath);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
         return false;
@@ -685,6 +867,21 @@ bool TimelineManager::loadProject(const QString& filePath) {
         }
         m_markers = loadedMarkers;
 
+        // Load extra options
+        m_showVideoBackground = j.value("showVideoBackground", true);
+        // Load lyric display mode (with legacy fallback)
+        if (j.contains("lyricDisplayMode")) {
+            m_lyricDisplayMode = j.value("lyricDisplayMode", 0);
+        } else {
+            // Legacy migration: lyricsOnlyMode true → mode 1
+            m_lyricDisplayMode = j.value("lyricsOnlyMode", false) ? 1 : 0;
+        }
+        m_exportAudioMode = j.value("exportAudioMode", 0);
+        m_songTitle = QString::fromStdString(j.value("songTitle", "Untitled Song"));
+        m_artistName = QString::fromStdString(j.value("artistName", "Unknown Artist"));
+        m_introSplashDuration = j.value("introSplashDuration", 3000);
+        m_endingVideoPath = QString::fromStdString(j.value("endingVideoPath", "splash_screen/end.mp4"));
+
         emit fpsChanged();
         emit currentPlayheadTimeChanged();
         emit totalDurationChanged();
@@ -695,6 +892,13 @@ bool TimelineManager::loadProject(const QString& filePath) {
         emit subtitleOutlineColorChanged();
         emit subtitleOutlineWidthChanged();
         emit markersChanged();
+        emit showVideoBackgroundChanged();
+        emit lyricDisplayModeChanged();
+        emit exportAudioModeChanged();
+        emit songTitleChanged();
+        emit artistNameChanged();
+        emit introSplashDurationChanged();
+        emit endingVideoPathChanged();
         emit projectLoaded();
         
         setIsDirty(false); // Reset dirty flag on successful load
@@ -748,6 +952,11 @@ void TimelineManager::clearProject() {
     m_subtitleOutlineColor = "#08080A";
     m_subtitleOutlineWidth = 2;
 
+    m_songTitle = "Untitled Song";
+    m_artistName = "Unknown Artist";
+    m_introSplashDuration = 3000;
+    m_endingVideoPath = "splash_screen/end.mp4";
+
     setIsDirty(false);
     
     emit currentPlayheadTimeChanged();
@@ -765,6 +974,10 @@ void TimelineManager::clearProject() {
     emit subtitleOutlineColorChanged();
     emit subtitleOutlineWidthChanged();
     emit markersChanged();
+    emit songTitleChanged();
+    emit artistNameChanged();
+    emit introSplashDurationChanged();
+    emit endingVideoPathChanged();
     emit projectCleared();
 }
 
@@ -1219,6 +1432,216 @@ bool TimelineManager::importLyricsFromFile(const QString& trackId, const QString
     }
 
     return false;
+}
+
+bool TimelineManager::importLyricsFromString(const QString& trackId, const QString& rawLrcContent) {
+    Track* track = m_trackListModel->getTrackById(trackId);
+    if (!track || track->isLocked()) {
+        return false;
+    }
+
+    QString content = rawLrcContent;
+    bool isSrt = content.contains("-->");
+    bool isLrc = content.contains("[") && content.contains("]");
+
+    if (!isSrt && !isLrc) {
+        return false;
+    }
+
+    if (isLrc) {
+        QStringList lines = content.split('\n');
+        struct LrcEntry {
+            qint64 startTimeUs;
+            QString text;
+        };
+        QList<LrcEntry> entries;
+
+        QRegularExpression timeRegex(R"(\[(\d+):(\d+(?:\.\d+)?)\])");
+
+        for (const QString& line : lines) {
+            QString trimmed = line.trimmed();
+            if (trimmed.isEmpty()) continue;
+
+            QRegularExpressionMatchIterator it = timeRegex.globalMatch(trimmed);
+            QList<qint64> times;
+            int lastTagEnd = 0;
+            while (it.hasNext()) {
+                QRegularExpressionMatch match = it.next();
+                int mins = match.captured(1).toInt();
+                double secs = match.captured(2).toDouble();
+                qint64 timeUs = static_cast<qint64>((mins * 60.0 + secs) * 1000000.0);
+                times.append(timeUs);
+                lastTagEnd = match.capturedEnd();
+            }
+
+            if (!times.isEmpty()) {
+                QString text = trimmed.mid(lastTagEnd).trimmed();
+                for (qint64 timeUs : times) {
+                    entries.append({timeUs, text});
+                }
+            }
+        }
+
+        if (entries.isEmpty()) return false;
+
+        std::sort(entries.begin(), entries.end(), [](const LrcEntry& a, const LrcEntry& b) {
+            return a.startTimeUs < b.startTimeUs;
+        });
+
+        track->blockSignals(true);
+        for (int i = 0; i < entries.size(); ++i) {
+            qint64 start = entries[i].startTimeUs;
+            qint64 duration = 4000000LL;
+            if (i < entries.size() - 1) {
+                qint64 diff = entries[i + 1].startTimeUs - start;
+                if (diff > 0) {
+                    duration = diff;
+                }
+            }
+            QString clipId = QString("clip_lyr_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+            addClipToTrack(trackId, clipId, 2, start, duration, "", entries[i].text);
+        }
+        track->blockSignals(false);
+        emit track->clipsChanged();
+
+        if (m_clipModels.contains(trackId)) {
+            m_clipModels[trackId]->refresh();
+        }
+
+        recalculateTotalDuration();
+        return true;
+    } else if (isSrt) {
+        QStringList lines = content.split('\n');
+        int state = 0;
+        qint64 startUs = 0;
+        qint64 durationUs = 0;
+        QString lyricText = "";
+
+        QRegularExpression timecodeRegex(R"((\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3}))");
+
+        track->blockSignals(true);
+        for (const QString& line : lines) {
+            QString trimmed = line.trimmed();
+            if (state == 0) {
+                if (trimmed.isEmpty()) continue;
+                bool ok = false;
+                trimmed.toInt(&ok);
+                if (ok) {
+                    state = 1;
+                }
+            } else if (state == 1) {
+                QRegularExpressionMatch match = timecodeRegex.match(trimmed);
+                if (match.hasMatch()) {
+                    int sh = match.captured(1).toInt();
+                    int sm = match.captured(2).toInt();
+                    int ss = match.captured(3).toInt();
+                    int sms = match.captured(4).toInt();
+
+                    int eh = match.captured(5).toInt();
+                    int em = match.captured(6).toInt();
+                    int es = match.captured(7).toInt();
+                    int ems = match.captured(8).toInt();
+
+                    qint64 start = (sh * 3600LL + sm * 60LL + ss) * 1000000LL + sms * 1000LL;
+                    qint64 end = (eh * 3600LL + em * 60LL + es) * 1000000LL + ems * 1000LL;
+
+                    startUs = start;
+                    durationUs = (end > start) ? (end - start) : 4000000LL;
+                    lyricText.clear();
+                    state = 2;
+                } else {
+                    state = 0;
+                }
+            } else if (state == 2) {
+                if (trimmed.isEmpty()) {
+                    if (!lyricText.isEmpty()) {
+                        QString clipId = QString("clip_lyr_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+                        addClipToTrack(trackId, clipId, 2, startUs, durationUs, "", lyricText.trimmed());
+                    }
+                    state = 0;
+                } else {
+                    if (!lyricText.isEmpty()) lyricText += " ";
+                    lyricText += trimmed;
+                }
+            }
+        }
+        if (state == 2 && !lyricText.isEmpty()) {
+            QString clipId = QString("clip_lyr_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+            addClipToTrack(trackId, clipId, 2, startUs, durationUs, "", lyricText.trimmed());
+        }
+        track->blockSignals(false);
+        emit track->clipsChanged();
+
+        if (m_clipModels.contains(trackId)) {
+            m_clipModels[trackId]->refresh();
+        }
+
+        recalculateTotalDuration();
+        return true;
+    }
+
+    return false;
+}
+
+void TimelineManager::setShowVideoBackground(bool show) {
+    if (m_showVideoBackground != show) {
+        m_showVideoBackground = show;
+        emit showVideoBackgroundChanged();
+        setIsDirty(true);
+    }
+}
+
+void TimelineManager::setLyricsOnlyMode(bool only) {
+    // Legacy setter: maps bool to display mode (0 or 1)
+    setLyricDisplayMode(only ? 1 : 0);
+}
+
+void TimelineManager::setLyricDisplayMode(int mode) {
+    int clamped = qBound(0, mode, 3);
+    if (m_lyricDisplayMode != clamped) {
+        m_lyricDisplayMode = clamped;
+        if (m_lyricEngine)
+            m_lyricEngine->setDisplayMode(clamped);
+        emit lyricDisplayModeChanged();
+        setIsDirty(true);
+    }
+}
+
+void TimelineManager::setExportAudioMode(int mode) {
+    if (m_exportAudioMode != mode) {
+        m_exportAudioMode = mode;
+        emit exportAudioModeChanged();
+        setIsDirty(true);
+    }
+}
+
+QString TimelineManager::romanizeText(const QString& text) const {
+    return Romanizer::romanize(text);
+}
+
+void TimelineManager::romanizeClip(QObject* clipObj) {
+    Clip* clip = qobject_cast<Clip*>(clipObj);
+    if (clip) {
+        clip->romanize();
+    }
+}
+
+bool TimelineManager::disableHwDecoding() const {
+    QSettings settings("NC-KTV", "NC-KTV_V2");
+    return settings.value("disable_hw_decoding", false).toBool();
+}
+
+void TimelineManager::setDisableHwDecoding(bool disable) {
+    QSettings settings("NC-KTV", "NC-KTV_V2");
+    if (settings.value("disable_hw_decoding", false).toBool() != disable) {
+        settings.setValue("disable_hw_decoding", disable);
+        emit disableHwDecodingChanged();
+    }
+}
+
+void TimelineManager::restartApplication() {
+    QProcess::startDetached(QCoreApplication::applicationFilePath(), QCoreApplication::arguments());
+    QCoreApplication::quit();
 }
 
 } // namespace ncktv

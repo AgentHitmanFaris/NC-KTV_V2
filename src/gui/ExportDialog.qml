@@ -67,7 +67,7 @@ Popup {
             }
             Label {
                 text: "Export Video Pipeline"
-                font.pixelSize: 20
+                font.pixelSize: 23
                 font.bold: true
                 font.family: "Outfit"
                 color: "#F0F0F5"
@@ -167,6 +167,102 @@ Popup {
                 }
             }
 
+            // Video Mode Choice
+            RowLayout {
+                spacing: 15
+                Label {
+                    text: "Background:"
+                    font.bold: true
+                    color: "#8A8A9E"
+                    Layout.preferredWidth: 100
+                }
+                ComboBox {
+                    id: comboVideoMode
+                    Layout.fillWidth: true
+                    model: ["Include Video Track", "Clean Background (Lyrics Only)"]
+                    currentIndex: timelineManager.showVideoBackground ? 0 : 1
+                    onActivated: {
+                        timelineManager.showVideoBackground = (index === 0);
+                    }
+                    
+                    background: Rectangle {
+                        color: "#1B1B22"
+                        border.color: "#2A2A35"
+                        radius: 6
+                    }
+                    contentItem: Text {
+                        text: comboVideoMode.currentText
+                        color: "#F0F0F5"
+                        verticalAlignment: Text.AlignVCenter
+                        leftPadding: 10
+                    }
+                }
+            }
+
+            // Lyrics Layout Choice
+            RowLayout {
+                spacing: 15
+                Label {
+                    text: "Lyrics Layout:"
+                    font.bold: true
+                    color: "#8A8A9E"
+                    Layout.preferredWidth: 100
+                }
+                ComboBox {
+                    id: comboLyricsLayout
+                    Layout.fillWidth: true
+                    model: ["Standard Bottom Overlay", "Center Waiting Queue", "Word Bounce rhythm", "Cinematic Full-Screen"]
+                    currentIndex: timelineManager.lyricDisplayMode
+                    onActivated: {
+                        timelineManager.lyricDisplayMode = index;
+                    }
+                    
+                    background: Rectangle {
+                        color: "#1B1B22"
+                        border.color: "#2A2A35"
+                        radius: 6
+                    }
+                    contentItem: Text {
+                        text: comboLyricsLayout.currentText
+                        color: "#F0F0F5"
+                        verticalAlignment: Text.AlignVCenter
+                        leftPadding: 10
+                    }
+                }
+            }
+
+            // Audio Export Mode Choice
+            RowLayout {
+                spacing: 15
+                Label {
+                    text: "Audio Mix:"
+                    font.bold: true
+                    color: "#8A8A9E"
+                    Layout.preferredWidth: 100
+                }
+                ComboBox {
+                    id: comboAudioMode
+                    Layout.fillWidth: true
+                    model: ["Full Sound Mix", "Instrumental Track Only"]
+                    currentIndex: timelineManager.exportAudioMode
+                    onActivated: {
+                        timelineManager.exportAudioMode = index;
+                    }
+                    
+                    background: Rectangle {
+                        color: "#1B1B22"
+                        border.color: "#2A2A35"
+                        radius: 6
+                    }
+                    contentItem: Text {
+                        text: comboAudioMode.currentText
+                        color: "#F0F0F5"
+                        verticalAlignment: Text.AlignVCenter
+                        leftPadding: 10
+                    }
+                }
+            }
+
             // Output File Destination
             ColumnLayout {
                 Layout.fillWidth: true
@@ -184,7 +280,7 @@ Popup {
                         text: "D:/Document/NC-Project/NC-KTV/NC-KTV_V2/export.mp4"
                         placeholderText: "Output video file path..."
                         color: "#F0F0F5"
-                        font.pixelSize: 12
+                        font.pixelSize: 16
                         
                         background: Rectangle {
                             color: "#1B1B22"
@@ -302,7 +398,7 @@ Popup {
                 }
                 Label {
                     text: timelineManager.renderProgress >= 1.0 ? "Export Completed!" : "Encoding Audio & Video Tracks..."
-                    font.pixelSize: 15
+                    font.pixelSize: 18
                     font.bold: true
                     color: "#F0F0F5"
                 }
@@ -338,13 +434,13 @@ Popup {
                     Layout.fillWidth: true
                     Label {
                         text: timelineManager.renderStatusText
-                        font.pixelSize: 11
+                        font.pixelSize: 15
                         color: "#8A8A9E"
                         Layout.fillWidth: true
                     }
                     Label {
                         text: Math.round(timelineManager.renderProgress * 100) + "%"
-                        font.pixelSize: 13
+                        font.pixelSize: 17
                         font.bold: true
                         color: "#00E676"
                     }

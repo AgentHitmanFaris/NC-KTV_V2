@@ -63,7 +63,7 @@ Rectangle {
                     Label {
                         text: trackName
                         font.bold: true
-                        font.pixelSize: 12
+                        font.pixelSize: 16
                         color: rootWindow.colorTextPrimary
                         elide: Text.ElideRight
                         Layout.fillWidth: true
@@ -73,7 +73,7 @@ Rectangle {
                 // Track Type Tag
                 Label {
                     text: trackType === 0 ? "AUDIO TRACK" : (trackType === 1 ? "VIDEO TRACK" : "LYRIC CUES")
-                    font.pixelSize: 9
+                    font.pixelSize: 13
                     color: trackType === 0 ? rootWindow.colorTextSecondary : (trackType === 1 ? "#FFAB40" : rootWindow.colorAccentGreen)
                 }
 
@@ -122,7 +122,7 @@ Rectangle {
                         contentItem: Text {
                             text: btnAddCue.text
                             font.bold: true
-                            font.pixelSize: 9
+                            font.pixelSize: 13
                             color: rootWindow.colorAccentGreen
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
@@ -146,7 +146,7 @@ Rectangle {
                         contentItem: Text {
                             text: btnImportSrtLrc.text
                             font.bold: true
-                            font.pixelSize: 9
+                            font.pixelSize: 13
                             color: rootWindow.colorAccentViolet
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
@@ -161,7 +161,7 @@ Rectangle {
                     Layout.fillWidth: true
                     Label {
                         text: "Vol:"
-                        font.pixelSize: 9
+                        font.pixelSize: 13
                         color: rootWindow.colorTextSecondary
                     }
                     Slider {
@@ -221,7 +221,7 @@ Rectangle {
                         contentItem: Text {
                             text: "M"
                             font.bold: true
-                            font.pixelSize: 9
+                            font.pixelSize: 13
                             color: btnMute.checked ? "#FFF" : rootWindow.colorTextSecondary
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
@@ -248,7 +248,7 @@ Rectangle {
                         contentItem: Text {
                             text: "L"
                             font.bold: true
-                            font.pixelSize: 9
+                            font.pixelSize: 13
                             color: btnLock.checked ? "#000" : rootWindow.colorTextSecondary
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
@@ -273,7 +273,7 @@ Rectangle {
                         contentItem: Text {
                             text: "X"
                             font.bold: true
-                            font.pixelSize: 9
+                            font.pixelSize: 13
                             color: btnDelete.hovered ? "#FFF" : rootWindow.colorTextSecondary
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter

@@ -68,7 +68,7 @@ Rectangle {
         Label {
             text: clipData ? clipData.clipId : ""
             font.bold: true
-            font.pixelSize: 10
+            font.pixelSize: 14
             color: "#8E8E9E"
             elide: Text.ElideRight
             width: parent.width
@@ -87,7 +87,7 @@ Rectangle {
                     return path.substring(path.lastIndexOf("/") + 1);
                 }
                 visible: clipData && clipData.clipType === 0
-                font.pixelSize: 10
+                font.pixelSize: 14
                 font.bold: true
                 color: "#FFFFFF"
                 elide: Text.ElideRight
@@ -105,7 +105,7 @@ Rectangle {
                 Label {
                     id: bgLyricLabel
                     text: clipData && clipData.clipType === 2 ? clipData.lyricText : ""
-                    font.pixelSize: 13
+                    font.pixelSize: 17
                     font.bold: true
                     color: "#5A5A6C"
                     elide: Text.ElideRight
@@ -125,7 +125,7 @@ Rectangle {
 
                     Label {
                         text: bgLyricLabel.text
-                        font.pixelSize: 13
+                        font.pixelSize: 17
                         font.bold: true
                         color: "#00E676" // Fluent active Karaoke neon green
                         width: bgLyricLabel.width
@@ -243,8 +243,20 @@ Rectangle {
             onReleased: {
                 if (!clipData) return;
                 
+                var originalEndTimeUs = clipData.startTime + clipData.duration;
                 var targetStartTimeUs = (clipItemRoot.x / zoomFactor) * 1000000.0;
-                var targetDurationUs = (clipItemRoot.width / zoomFactor) * 1000000.0;
+                var targetDurationUs = originalEndTimeUs - targetStartTimeUs;
+                
+                // Calculate sourceStart shift: how much the timeline start moved
+                var deltaStartUs = targetStartTimeUs - clipData.startTime;
+                var newSourceStartUs = clipData.sourceStart + deltaStartUs;
+                
+                // Clamp sourceStart at 0 (cannot reveal content before the source file begins)
+                if (newSourceStartUs < 0) {
+                    newSourceStartUs = 0;
+                    targetStartTimeUs = clipData.startTime - clipData.sourceStart;
+                    targetDurationUs = originalEndTimeUs - targetStartTimeUs;
+                }
                 
                 // Enforce same-track collision safety when resizing left
                 if (parentTrack) {
@@ -259,12 +271,15 @@ Rectangle {
                         }
                     }
                     if (closestLeftClipEnd !== -1 && targetStartTimeUs < closestLeftClipEnd) {
+                        var collisionDelta = closestLeftClipEnd - targetStartTimeUs;
                         targetStartTimeUs = closestLeftClipEnd;
-                        targetDurationUs = (clipData.startTime + clipData.duration) - targetStartTimeUs;
+                        targetDurationUs = originalEndTimeUs - targetStartTimeUs;
+                        newSourceStartUs = newSourceStartUs + collisionDelta;
                     }
                 }
                 
-                // Write back to C++ once
+                // Write back to C++ (sourceStart, startTime, duration)
+                clipData.sourceStart = Math.round(newSourceStartUs);
                 clipData.startTime = Math.round(targetStartTimeUs);
                 clipData.duration = Math.round(targetDurationUs);
                 timelineManager.setDirty();
@@ -321,6 +336,14 @@ Rectangle {
                 if (!clipData) return;
                 var targetDurationUs = (clipItemRoot.width / zoomFactor) * 1000000.0;
                 
+                // Clamp to source asset boundary (cannot extend beyond the raw media length)
+                if (clipData.sourceDuration > 0) {
+                    var maxDurationUs = clipData.sourceDuration - clipData.sourceStart;
+                    if (maxDurationUs > 0 && targetDurationUs > maxDurationUs) {
+                        targetDurationUs = maxDurationUs;
+                    }
+                }
+                
                 // Enforce same-track collision safety when resizing right
                 if (parentTrack) {
                     var closestRightClipStart = -1;
@@ -371,7 +394,7 @@ Rectangle {
             spacing: 4
             Label {
                 text: dragLeftArea.pressed ? "Trim L: " : (dragRightArea.pressed ? "Trim R: " : "Start: ")
-                font.pixelSize: 9
+                font.pixelSize: 13
                 font.bold: true
                 color: rootWindow.colorAccentGreen
             }
@@ -387,7 +410,7 @@ Rectangle {
                     var visualStartTimeUs = (currentX / zoomFactor) * 1000000.0;
                     return timelineManager.formatTimecode(visualStartTimeUs);
                 }
-                font.pixelSize: 9
+                font.pixelSize: 13
                 font.bold: true
                 color: "#FFF"
                 font.family: "Courier New"

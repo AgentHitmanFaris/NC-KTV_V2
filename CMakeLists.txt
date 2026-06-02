@@ -86,7 +86,7 @@ endif()
 if(WIN32)
     message(STATUS "NC-KTV V2: Fetching FFmpeg Shared Dev builds...")
     FetchContent_Declare(ffmpeg_dev
-        URL "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl-shared.zip"
+        URL "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-win64-gpl-shared-7.1.zip"
     )
     FetchContent_MakeAvailable(ffmpeg_dev)
 

@@ -24,6 +24,11 @@ configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/logo.ico
     COPYONLY
 )
+configure_file(
+    "${CMAKE_SOURCE_DIR}/splash screen/end.mp4"
+    "${CMAKE_CURRENT_SOURCE_DIR}/end.mp4"
+    COPYONLY
+)
 
 # Define the QML module under the URI 'ncktv.gui'
 qt_add_qml_module(NC-KTV_V2
@@ -37,11 +42,15 @@ qt_add_qml_module(NC-KTV_V2
         MediaBrowser.qml
         PropertiesPanel.qml
         ExportDialog.qml
+        KaraokeLyricView.qml
     SOURCES
         waveform_renderer.h
         waveform_renderer.cpp
+        karaoke_lyric_renderer.h
+        karaoke_lyric_renderer.cpp
     RESOURCES
         logo.png
+        end.mp4
 )
 
 target_link_libraries(NC-KTV_V2
@@ -81,5 +90,22 @@ if(WIN32)
                 $<TARGET_FILE_DIR:NC-KTV_V2>
             COMMENT "Deploying FFmpeg DLLs to build bin..."
         )
+    endif()
+
+    # 3. Deploy Qt runtime dependencies (DLLs, plugins, QML modules)
+    find_program(WINDEPLOYQT_EXECUTABLE windeployqt6
+        HINTS "${CMAKE_PREFIX_PATH}/bin"
+    )
+    if(WINDEPLOYQT_EXECUTABLE)
+        add_custom_command(TARGET NC-KTV_V2 POST_BUILD
+            COMMAND "${WINDEPLOYQT_EXECUTABLE}"
+                --no-translations
+                --no-compiler-runtime
+                --qmldir "${CMAKE_CURRENT_SOURCE_DIR}"
+                $<TARGET_FILE:NC-KTV_V2>
+            COMMENT "Running windeployqt6 to deploy Qt runtime dependencies..."
+        )
+    else()
+        message(WARNING "windeployqt6 not found. Qt runtime DLLs will not be auto-deployed.")
     endif()
 endif()

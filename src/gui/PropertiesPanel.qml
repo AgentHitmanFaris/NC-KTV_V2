@@ -11,8 +11,13 @@ Rectangle {
     property var selectedClip: null // C++ Clip* pointer
     property var selectedTrack: null // C++ Track* pointer
     property int lyricsViewMode: 0 // 0 = Track list sheet, 1 = Clip details & syllables
+    property var timelineManager: null
+    property real sylZoomFactor: 1.0
+    property int selectedSylIdx: -1
+
 
     onSelectedClipChanged: {
+        selectedSylIdx = -1;
         if (selectedClip !== null) {
             lyricsViewMode = 1;
         } else {
@@ -28,7 +33,7 @@ Rectangle {
         Label {
             text: "PROPERTIES INSPECTOR"
             font.bold: true
-            font.pixelSize: 13
+            font.pixelSize: 17
             color: rootWindow.colorTextPrimary
         }
 
@@ -52,7 +57,7 @@ Rectangle {
                 }
                 contentItem: Text {
                     text: tabBtnTrack.text
-                    font.pixelSize: 10
+                    font.pixelSize: 14
                     font.bold: true
                     color: propsPanelRoot.lyricsViewMode === 0 ? "#FFF" : rootWindow.colorTextSecondary
                     horizontalAlignment: Text.AlignHCenter
@@ -73,7 +78,7 @@ Rectangle {
                 }
                 contentItem: Text {
                     text: tabBtnClip.text
-                    font.pixelSize: 10
+                    font.pixelSize: 14
                     font.bold: true
                     color: propsPanelRoot.lyricsViewMode === 1 ? "#FFF" : rootWindow.colorTextSecondary
                     horizontalAlignment: Text.AlignHCenter
@@ -82,27 +87,318 @@ Rectangle {
             }
         }
 
-        // State 1: No Clip selected
-        Rectangle {
+        // State 1: Song Global Metadata (Nothing selected)
+        ScrollView {
             visible: propsPanelRoot.selectedClip === null && (propsPanelRoot.selectedTrack === null || propsPanelRoot.selectedTrack.trackType !== 2)
             Layout.fillWidth: true
             Layout.fillHeight: true
-            color: "transparent"
+            clip: true
 
             ColumnLayout {
-                anchors.centerIn: parent
-                spacing: 10
+                width: propsPanelRoot.width - 30
+                spacing: 16
+
                 Label {
-                    text: "No clip selected"
+                    text: "GLOBAL SONG METADATA"
+                    font.bold: true
+                    font.pixelSize: 16
+                    font.family: "Outfit"
+                    color: rootWindow.colorTextPrimary
+                }
+
+                // Description
+                Label {
+                    text: "Configure song parameters for the intro splash screen and ending video playback."
                     font.pixelSize: 14
                     color: rootWindow.colorTextSecondary
-                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
                 }
-                Label {
-                    text: "Select any clip on the timeline lanes\nto edit parameters, trim durations,\nor synchronize lyrics cues."
-                    font.pixelSize: 10
-                    color: "#555565"
-                    horizontalAlignment: Text.AlignHCenter
+
+                // Song Title Input Card
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+
+                    Label {
+                        text: "SONG TITLE"
+                        font.bold: true
+                        font.pixelSize: 14
+                        color: rootWindow.colorTextSecondary
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: 36
+                        color: rootWindow.colorBgCard
+                        border.color: rootWindow.colorBorder
+                        radius: 4
+
+                        TextField {
+                            id: txtGlobalSongTitle
+                            anchors.fill: parent
+                            anchors.margins: 4
+                            text: timelineManager.songTitle
+                            color: rootWindow.colorTextPrimary
+                            font.pixelSize: 16
+                            font.family: "Outfit"
+                            placeholderText: "Enter song title..."
+                            placeholderTextColor: "#444"
+                            background: null
+
+                            onTextEdited: {
+                                timelineManager.songTitle = text;
+                            }
+                        }
+                    }
+                }
+
+                // Artist Name Input Card
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+
+                    Label {
+                        text: "ARTIST NAME"
+                        font.bold: true
+                        font.pixelSize: 14
+                        color: rootWindow.colorTextSecondary
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: 36
+                        color: rootWindow.colorBgCard
+                        border.color: rootWindow.colorBorder
+                        radius: 4
+
+                        TextField {
+                            id: txtGlobalArtistName
+                            anchors.fill: parent
+                            anchors.margins: 4
+                            text: timelineManager.artistName
+                            color: rootWindow.colorTextPrimary
+                            font.pixelSize: 16
+                            font.family: "Outfit"
+                            placeholderText: "Enter artist name..."
+                            placeholderTextColor: "#444"
+                            background: null
+
+                            onTextEdited: {
+                                timelineManager.artistName = text;
+                            }
+                        }
+                    }
+                }
+
+                // Intro Duration Configuration Slider Card
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label {
+                            text: "INTRO DURATION"
+                            font.bold: true
+                            font.pixelSize: 14
+                            color: rootWindow.colorTextSecondary
+                        }
+                        Item { Layout.fillWidth: true }
+                        Label {
+                            text: (timelineManager.introSplashDuration / 1000.0).toFixed(1) + "s"
+                            font.bold: true
+                            font.pixelSize: 14
+                            color: rootWindow.colorAccentGreen
+                        }
+                    }
+
+                    Slider {
+                        id: sliderIntroDuration
+                        Layout.fillWidth: true
+                        from: 2000
+                        to: 5000
+                        stepSize: 100
+                        value: timelineManager.introSplashDuration
+                        onMoved: {
+                            timelineManager.introSplashDuration = Math.round(value);
+                        }
+
+                        background: Rectangle {
+                            implicitHeight: 4
+                            color: "#222"
+                            radius: 2
+                            Rectangle {
+                                width: sliderIntroDuration.visualPosition * parent.width
+                                height: parent.height
+                                color: rootWindow.colorAccentViolet
+                                radius: 2
+                            }
+                        }
+                        handle: Rectangle {
+                            x: sliderIntroDuration.visualPosition * (sliderIntroDuration.width - width)
+                            y: (sliderIntroDuration.height - height) / 2
+                            width: 12
+                            height: 12
+                            radius: 6
+                            color: sliderIntroDuration.hovered ? "#FFF" : rootWindow.colorAccentViolet
+                        }
+                    }
+                }
+
+                // Ending Video Path Customizer
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+
+                    Label {
+                        text: "ENDING VIDEO PATH"
+                        font.bold: true
+                        font.pixelSize: 14
+                        color: rootWindow.colorTextSecondary
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: 36
+                        color: rootWindow.colorBgCard
+                        border.color: rootWindow.colorBorder
+                        radius: 4
+
+                        TextField {
+                            id: txtEndingVideoPath
+                            anchors.fill: parent
+                            anchors.margins: 4
+                            text: timelineManager.endingVideoPath
+                            color: rootWindow.colorTextPrimary
+                            font.pixelSize: 16
+                            font.family: "Outfit"
+                            placeholderText: "splash_screen/end.mp4"
+                            placeholderTextColor: "#444"
+                            background: null
+
+                            onTextEdited: {
+                                timelineManager.endingVideoPath = text;
+                            }
+                        }
+                    }
+
+                    Label {
+                        text: "Customizable video splash triggered after song completion."
+                        font.pixelSize: 12
+                        color: "#555565"
+                    }
+                }
+
+                // Divider line
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 1
+                    color: rootWindow.colorBorder
+                }
+
+                // Help/Tips Card
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: 90
+                    color: "#161622"
+                    border.color: rootWindow.colorBorder
+                    radius: 4
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        spacing: 4
+
+                        Label {
+                            text: "PRO-KARAOKE TIPS"
+                            font.bold: true
+                            font.pixelSize: 13
+                            color: rootWindow.colorAccentGreen
+                        }
+
+                        Label {
+                            text: "• Hit Spacebar to trigger song playback\n• Double-click an asset to load in Source Monitor\n• Select a subtitle clip to edit lyrics syllables\n• Keep playhead at start to see the Intro Splash"
+                            font.pixelSize: 13
+                            color: rootWindow.colorTextSecondary
+                            lineHeight: 1.3
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                    }
+                }
+
+                // Divider line
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 1
+                    color: rootWindow.colorBorder
+                }
+
+                // System preferences / Compatibility Card
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: 110
+                    color: "#1A1625"
+                    border.color: rootWindow.colorBorder
+                    radius: 4
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        spacing: 6
+
+                        Label {
+                            text: "SYSTEM DECODING PREFERENCES"
+                            font.bold: true
+                            font.pixelSize: 13
+                            color: rootWindow.colorAccentViolet
+                        }
+
+                        Label {
+                            text: "Configure video decoding engine. Switch to Software mode if you experience playback freezes, black screens, or 4K format errors."
+                            font.pixelSize: 11
+                            color: rootWindow.colorTextSecondary
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Label {
+                                text: "Mode: " + (timelineManager.disableHwDecoding ? "Software Mode (Safe)" : "Hardware Decoding (Fast)")
+                                font.bold: true
+                                font.pixelSize: 11
+                                color: timelineManager.disableHwDecoding ? "#FFAB40" : rootWindow.colorAccentGreen
+                                Layout.fillWidth: true
+                            }
+
+                            Button {
+                                id: btnToggleHw
+                                text: timelineManager.disableHwDecoding ? "Use Hardware" : "Use Software"
+                                implicitWidth: 100
+                                implicitHeight: 24
+                                onClicked: {
+                                    restartDialog.open();
+                                }
+                                background: Rectangle {
+                                    color: btnToggleHw.hovered ? rootWindow.colorAccentViolet : "#2D264A"
+                                    radius: 3
+                                    border.color: rootWindow.colorBorder
+                                }
+                                contentItem: Text {
+                                    text: btnToggleHw.text
+                                    font.bold: true
+                                    font.pixelSize: 11
+                                    color: "#FFF"
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -134,19 +430,19 @@ Rectangle {
                         Label {
                             text: "CLIP ID: " + (selectedClip ? selectedClip.clipId : "")
                             font.bold: true
-                            font.pixelSize: 11
+                            font.pixelSize: 15
                             color: rootWindow.colorAccentViolet
                         }
 
                         Label {
                             text: "TYPE: " + (selectedClip ? (selectedClip.clipType === 0 ? "Audio Clip" : "Lyric subtitle") : "")
-                            font.pixelSize: 10
+                            font.pixelSize: 14
                             color: rootWindow.colorTextSecondary
                         }
 
                         Label {
                             text: "TRACK ID: " + (selectedTrack ? selectedTrack.trackId : "")
-                            font.pixelSize: 10
+                            font.pixelSize: 14
                             color: rootWindow.colorTextSecondary
                         }
                     }
@@ -156,16 +452,16 @@ Rectangle {
                 Label {
                     text: "TIMING COORDINATES"
                     font.bold: true
-                    font.pixelSize: 10
+                    font.pixelSize: 14
                     color: rootWindow.colorTextSecondary
                 }
 
                 RowLayout {
                     spacing: 10
-                    Label { text: "Start:"; font.pixelSize: 11; color: rootWindow.colorTextPrimary; Layout.preferredWidth: 60 }
+                    Label { text: "Start:"; font.pixelSize: 15; color: rootWindow.colorTextPrimary; Layout.preferredWidth: 60 }
                     Label {
                         text: selectedClip ? timelineManager.formatTimecode(selectedClip.startTime) : "00:00:00:00"
-                        font.pixelSize: 11
+                        font.pixelSize: 15
                         font.bold: true
                         color: rootWindow.colorAccentGreen
                         font.family: "Courier New"
@@ -174,10 +470,10 @@ Rectangle {
 
                 RowLayout {
                     spacing: 10
-                    Label { text: "Duration:"; font.pixelSize: 11; color: rootWindow.colorTextPrimary; Layout.preferredWidth: 60 }
+                    Label { text: "Duration:"; font.pixelSize: 15; color: rootWindow.colorTextPrimary; Layout.preferredWidth: 60 }
                     Label {
                         text: selectedClip ? timelineManager.formatTimecode(selectedClip.duration) : "00:00:00:00"
-                        font.pixelSize: 11
+                        font.pixelSize: 15
                         font.bold: true
                         color: rootWindow.colorAccentGreen
                         font.family: "Courier New"
@@ -186,10 +482,10 @@ Rectangle {
 
                 RowLayout {
                     spacing: 10
-                    Label { text: "End:"; font.pixelSize: 11; color: rootWindow.colorTextPrimary; Layout.preferredWidth: 60 }
+                    Label { text: "End:"; font.pixelSize: 15; color: rootWindow.colorTextPrimary; Layout.preferredWidth: 60 }
                     Label {
                         text: selectedClip ? timelineManager.formatTimecode(selectedClip.endTime) : "00:00:00:00"
-                        font.pixelSize: 11
+                        font.pixelSize: 15
                         font.bold: true
                         color: rootWindow.colorAccentGreen
                         font.family: "Courier New"
@@ -205,7 +501,7 @@ Rectangle {
                     Label {
                         text: "LYRICS TEXT CUE"
                         font.bold: true
-                        font.pixelSize: 10
+                        font.pixelSize: 14
                         color: rootWindow.colorTextSecondary
                     }
 
@@ -222,7 +518,7 @@ Rectangle {
                             anchors.margins: 6
                             text: selectedClip ? selectedClip.lyricText : ""
                             color: rootWindow.colorTextPrimary
-                            font.pixelSize: 12
+                            font.pixelSize: 16
                             wrapMode: TextArea.Wrap
                             placeholderText: "Enter lyric line text..."
                             placeholderTextColor: "#444"
@@ -238,11 +534,39 @@ Rectangle {
                     }
 
                     Label {
-                        text: "💡 Timing tip: Type standard text to auto-distribute syllable timings, or enter LRC tags (e.g. '<0:05.20>Hello <0:06.10>World') for precision glowing sweeps."
-                        font.pixelSize: 8
+                        text: "Tip: Type standard text to auto-distribute syllable timings, or enter LRC tags (e.g. '<0:05.20>Hello <0:06.10>World') for precision glowing sweeps."
+                        font.pixelSize: 12
                         color: "#8A8A9E"
                         wrapMode: Text.Wrap
                         Layout.fillWidth: true
+                    }
+
+                    Button {
+                        id: btnRomanizeLine
+                        text: "ROMANIZE LINE"
+                        Layout.fillWidth: true
+                        implicitHeight: 26
+                        onClicked: {
+                            if (selectedClip) {
+                                timelineManager.romanizeClip(selectedClip);
+                                txtLyricField.text = selectedClip.lyricText;
+                                timelineManager.setDirty(true);
+                            }
+                        }
+                        background: Rectangle {
+                            color: btnRomanizeLine.hovered ? "#2D264A" : "#16161D"
+                            radius: 3
+                            border.color: btnRomanizeLine.hovered ? rootWindow.colorAccentViolet : rootWindow.colorBorder
+                            border.width: 1
+                        }
+                        contentItem: Text {
+                            text: btnRomanizeLine.text
+                            font.bold: true
+                            font.pixelSize: 13
+                            color: "#FFF"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
                     }
                 }
 
@@ -255,14 +579,140 @@ Rectangle {
                     Label {
                         text: "SYLLABLE TIMING TUNER"
                         font.bold: true
-                        font.pixelSize: 10
+                        font.pixelSize: 14
                         color: rootWindow.colorTextSecondary
+                    }
+
+                    // Syllable Map Zoom Controls
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Label {
+                            text: "Zoom:"
+                            font.pixelSize: 13
+                            color: rootWindow.colorTextSecondary
+                        }
+                        Slider {
+                            id: sylZoomSlider
+                            Layout.fillWidth: true
+                            from: 0.5
+                            to: 5.0
+                            value: propsPanelRoot.sylZoomFactor
+                            onMoved: propsPanelRoot.sylZoomFactor = value
+                            
+                            background: Rectangle {
+                                implicitHeight: 3
+                                color: "#222"
+                                radius: 1.5
+                                Rectangle {
+                                    width: sylZoomSlider.visualPosition * parent.width
+                                    height: parent.height
+                                    color: rootWindow.colorAccentViolet
+                                    radius: 1.5
+                                }
+                            }
+                            handle: Rectangle {
+                                x: sylZoomSlider.visualPosition * (sylZoomSlider.width - width)
+                                y: (sylZoomSlider.height - height) / 2
+                                width: 10
+                                height: 10
+                                radius: 5
+                                color: sylZoomSlider.hovered ? "#FFF" : rootWindow.colorAccentViolet
+                            }
+                        }
+                        Label {
+                            text: propsPanelRoot.sylZoomFactor.toFixed(1) + "x"
+                            font.pixelSize: 13
+                            color: rootWindow.colorTextPrimary
+                            Layout.preferredWidth: 25
+                        }
+                    }
+
+                    // Visual Horizontal Syllable Map
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: 52
+                        color: "#0B0B0E"
+                        border.color: rootWindow.colorBorder
+                        radius: 4
+                        clip: true
+
+                        Flickable {
+                            id: sylFlickable
+                            anchors.fill: parent
+                            anchors.margins: 4
+                            contentWidth: sylRow.implicitWidth
+                            contentHeight: parent.height - 8
+                            clip: true
+                            flickableDirection: Flickable.HorizontalFlick
+                            ScrollBar.horizontal: ScrollBar {
+                                active: true
+                                policy: ScrollBar.AsNeeded
+                            }
+
+                            Row {
+                                id: sylRow
+                                height: parent.height - 6
+                                spacing: 2
+
+                                Repeater {
+                                    model: selectedClip ? selectedClip.syllables : []
+                                    delegate: Rectangle {
+                                        height: parent.height
+                                        width: Math.max(50.0, (modelData.duration / 1000000.0) * 180.0 * propsPanelRoot.sylZoomFactor)
+                                        
+                                        property bool isActive: {
+                                            if (!selectedClip) return false;
+                                            var playhead = timelineManager.currentPlayheadTime;
+                                            var absStart = selectedClip.startTime + modelData.relativeStart;
+                                            var absEnd = absStart + modelData.duration;
+                                            return (playhead >= absStart && playhead < absEnd);
+                                        }
+                                        property bool isSelected: propsPanelRoot.selectedSylIdx === index
+
+                                        color: isActive ? "#2D1A4D" : (isSelected ? "#221C35" : "#14141A")
+                                        border.color: isActive ? rootWindow.colorAccentGreen : (isSelected ? rootWindow.colorAccentViolet : rootWindow.colorBorder)
+                                        border.width: (isActive || isSelected) ? 2 : 1
+                                        radius: 3
+
+                                        Column {
+                                            anchors.centerIn: parent
+                                            spacing: 1
+                                            Text {
+                                                text: modelData.text.trim()
+                                                color: isActive ? "#FFF" : rootWindow.colorTextPrimary
+                                                font.bold: true
+                                                font.pixelSize: 14
+                                                anchors.horizontalCenter: parent.horizontalCenter
+                                                elide: Text.ElideRight
+                                                width: parent.parent.width - 6
+                                                horizontalAlignment: Text.AlignHCenter
+                                            }
+                                            Text {
+                                                text: (modelData.duration / 1000000.0).toFixed(2) + "s"
+                                                color: isActive ? rootWindow.colorAccentGreen : rootWindow.colorTextSecondary
+                                                font.pixelSize: 11
+                                                anchors.horizontalCenter: parent.horizontalCenter
+                                            }
+                                        }
+
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            onClicked: {
+                                                propsPanelRoot.selectedSylIdx = index;
+                                                sylListView.positionViewAtIndex(index, ListView.Contain);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     // Syllable List container
                     Rectangle {
                         Layout.fillWidth: true
-                        implicitHeight: 180
+                        implicitHeight: 220
                         color: rootWindow.colorBgCard
                         border.color: rootWindow.colorBorder
                         radius: 4
@@ -278,9 +728,25 @@ Rectangle {
                             delegate: Rectangle {
                                 width: sylListView.width - 12
                                 height: 36
-                                color: "#16161D"
-                                border.color: rootWindow.colorBorder
+                                
+                                property bool isActive: {
+                                    if (!selectedClip) return false;
+                                    var playhead = timelineManager.currentPlayheadTime;
+                                    var absStart = selectedClip.startTime + modelData.relativeStart;
+                                    var absEnd = absStart + modelData.duration;
+                                    return (playhead >= absStart && playhead < absEnd);
+                                }
+                                property bool isSelected: propsPanelRoot.selectedSylIdx === index
+
+                                color: isActive ? "#2D1A4D" : (isSelected ? "#221C35" : "#16161D")
+                                border.color: isActive ? rootWindow.colorAccentGreen : (isSelected ? rootWindow.colorAccentViolet : rootWindow.colorBorder)
+                                border.width: (isActive || isSelected) ? 2 : 1
                                 radius: 4
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: propsPanelRoot.selectedSylIdx = index
+                                }
                                 
                                 RowLayout {
                                     anchors.fill: parent
@@ -291,7 +757,7 @@ Rectangle {
                                     Label {
                                         text: modelData.text.trim()
                                         font.bold: true
-                                        font.pixelSize: 11
+                                        font.pixelSize: 15
                                         color: "#FFF"
                                         Layout.preferredWidth: 80
                                         elide: Text.ElideRight
@@ -300,7 +766,7 @@ Rectangle {
                                     // Offset display
                                     Label {
                                         text: (modelData.relativeStart / 1000000.0).toFixed(2) + "s"
-                                        font.pixelSize: 9
+                                        font.pixelSize: 13
                                         color: rootWindow.colorAccentGreen
                                         font.family: "Courier New"
                                         Layout.preferredWidth: 40
@@ -319,7 +785,7 @@ Rectangle {
                                                 timelineManager.setDirty(true);
                                             }
                                             background: Rectangle { color: "#222"; radius: 2 }
-                                            contentItem: Text { text: "-50ms"; font.pixelSize: 7; color: "#F0F0F5"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                            contentItem: Text { text: "-50ms"; font.pixelSize: 11; color: "#F0F0F5"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                                         }
                                         Button {
                                             text: "Start +"
@@ -331,14 +797,14 @@ Rectangle {
                                                 timelineManager.setDirty(true);
                                             }
                                             background: Rectangle { color: "#222"; radius: 2 }
-                                            contentItem: Text { text: "+50ms"; font.pixelSize: 7; color: "#F0F0F5"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                            contentItem: Text { text: "+50ms"; font.pixelSize: 11; color: "#F0F0F5"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                                         }
                                     }
                                     
                                     // Duration display
                                     Label {
                                         text: (modelData.duration / 1000000.0).toFixed(2) + "s"
-                                        font.pixelSize: 9
+                                        font.pixelSize: 13
                                         color: rootWindow.colorAccentGreen
                                         font.family: "Courier New"
                                         Layout.preferredWidth: 40
@@ -357,7 +823,7 @@ Rectangle {
                                                 timelineManager.setDirty(true);
                                             }
                                             background: Rectangle { color: "#222"; radius: 2 }
-                                            contentItem: Text { text: "-50ms"; font.pixelSize: 7; color: "#F0F0F5"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                            contentItem: Text { text: "-50ms"; font.pixelSize: 11; color: "#F0F0F5"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                                         }
                                         Button {
                                             text: "Dur +"
@@ -369,7 +835,7 @@ Rectangle {
                                                 timelineManager.setDirty(true);
                                             }
                                             background: Rectangle { color: "#222"; radius: 2 }
-                                            contentItem: Text { text: "+50ms"; font.pixelSize: 7; color: "#F0F0F5"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                            contentItem: Text { text: "+50ms"; font.pixelSize: 11; color: "#F0F0F5"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                                         }
                                     }
                                 }
@@ -387,13 +853,13 @@ Rectangle {
                     Label {
                         text: "AUDIO SOURCE FILE"
                         font.bold: true
-                        font.pixelSize: 10
+                        font.pixelSize: 14
                         color: rootWindow.colorTextSecondary
                     }
 
                     Label {
                         text: selectedClip ? selectedClip.sourceFile : ""
-                        font.pixelSize: 9
+                        font.pixelSize: 13
                         color: rootWindow.colorTextSecondary
                         wrapMode: Text.WrapAnywhere
                         Layout.fillWidth: true
@@ -409,7 +875,7 @@ Rectangle {
                     Label {
                         text: "AI STEM SEPARATION"
                         font.bold: true
-                        font.pixelSize: 10
+                        font.pixelSize: 14
                         color: rootWindow.colorTextSecondary
                     }
 
@@ -422,7 +888,7 @@ Rectangle {
                             text: "Folder: " + (timelineManager.modelsDirPath !== "" ? 
                                   (timelineManager.modelsDirPath.length > 25 ? "..." + timelineManager.modelsDirPath.substring(timelineManager.modelsDirPath.length - 22) : timelineManager.modelsDirPath) 
                                   : "None")
-                            font.pixelSize: 9
+                            font.pixelSize: 13
                             color: rootWindow.colorTextSecondary
                             elide: Text.ElideMiddle
                         }
@@ -442,7 +908,7 @@ Rectangle {
                             contentItem: Text {
                                 text: btnSelectFolderProp.text
                                 font.bold: true
-                                font.pixelSize: 8
+                                font.pixelSize: 12
                                 color: "#FFF"
                                 horizontalAlignment: Text.AlignHCenter
                                 verticalAlignment: Text.AlignVCenter
@@ -457,7 +923,7 @@ Rectangle {
 
                         Label {
                             text: "Model:"
-                            font.pixelSize: 9
+                            font.pixelSize: 13
                             font.bold: true
                             color: rootWindow.colorTextSecondary
                             Layout.alignment: Qt.AlignVCenter
@@ -481,7 +947,7 @@ Rectangle {
                                     text: modelData
                                     color: highlighted ? "#FFF" : "#8A8A9E"
                                     font.bold: highlighted
-                                    font.pixelSize: 9
+                                    font.pixelSize: 13
                                     font.family: "Outfit"
                                     elide: Text.ElideRight
                                     verticalAlignment: Text.AlignVCenter
@@ -495,7 +961,7 @@ Rectangle {
                                 leftPadding: 6
                                 rightPadding: 20
                                 text: modelComboProp.currentText
-                                font.pixelSize: 9
+                                font.pixelSize: 13
                                 font.bold: true
                                 font.family: "Outfit"
                                 color: rootWindow.colorAccentGreen
@@ -521,7 +987,7 @@ Rectangle {
                         Label {
                             Layout.fillWidth: true
                             text: "No models found (DSP Fallback)"
-                            font.pixelSize: 9
+                            font.pixelSize: 13
                             font.bold: true
                             color: "#E57373"
                             elide: Text.ElideMiddle
@@ -542,7 +1008,7 @@ Rectangle {
                             contentItem: Text {
                                 text: btnSelectFileProp.text
                                 font.bold: true
-                                font.pixelSize: 8
+                                font.pixelSize: 12
                                 color: "#FFF"
                                 horizontalAlignment: Text.AlignHCenter
                                 verticalAlignment: Text.AlignVCenter
@@ -577,7 +1043,7 @@ Rectangle {
                         contentItem: Text {
                             text: btnSeparateStems.text
                             font.bold: true
-                            font.pixelSize: 9
+                            font.pixelSize: 13
                             color: btnSeparateStems.enabled ? "#FFF" : "#666"
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
@@ -594,14 +1060,14 @@ Rectangle {
                             Layout.fillWidth: true
                             Label {
                                 text: timelineManager.separationStatusText
-                                font.pixelSize: 9
+                                font.pixelSize: 13
                                 color: rootWindow.colorTextSecondary
                                 Layout.fillWidth: true
                                 wrapMode: Text.Wrap
                             }
                             Label {
                                 text: Math.round(timelineManager.separationProgress * 100) + "%"
-                                font.pixelSize: 9
+                                font.pixelSize: 13
                                 font.bold: true
                                 color: rootWindow.colorAccentGreen
                             }
@@ -662,7 +1128,7 @@ Rectangle {
                         contentItem: Text {
                             text: btnSplitClip.text
                             font.bold: true
-                            font.pixelSize: 9
+                            font.pixelSize: 13
                             color: btnSplitClip.enabled ? "#FFF" : "#555"
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
@@ -691,7 +1157,7 @@ Rectangle {
                         contentItem: Text {
                             text: btnDeleteClip.text
                             font.bold: true
-                            font.pixelSize: 9
+                            font.pixelSize: 13
                             color: "#EF5350"
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
@@ -717,7 +1183,7 @@ Rectangle {
                 Label {
                     text: "LYRICS SHEET EDITOR"
                     font.bold: true
-                    font.pixelSize: 11
+                    font.pixelSize: 15
                     color: rootWindow.colorTextPrimary
                     Layout.fillWidth: true
                 }
@@ -739,9 +1205,40 @@ Rectangle {
                     }
                     contentItem: Text {
                         text: btnAddCaptionLine.text
-                        font.pixelSize: 9
+                        font.pixelSize: 13
                         font.bold: true
                         color: rootWindow.colorAccentGreen
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+
+                // Romanize Track Button
+                Button {
+                    id: btnRomanizeTrack
+                    text: "ROMANIZE"
+                    implicitWidth: 70
+                    implicitHeight: 22
+                    onClicked: {
+                        if (selectedTrack) {
+                            var clips = selectedTrack.clips();
+                            for (var i = 0; i < clips.length; ++i) {
+                                timelineManager.romanizeClip(clips[i]);
+                            }
+                            timelineManager.setDirty(true);
+                        }
+                    }
+                    background: Rectangle {
+                        color: btnRomanizeTrack.hovered ? "#4A148C" : "#2A1B3D"
+                        radius: 3
+                        border.color: rootWindow.colorAccentViolet
+                        border.width: 1
+                    }
+                    contentItem: Text {
+                        text: btnRomanizeTrack.text
+                        font.pixelSize: 13
+                        font.bold: true
+                        color: rootWindow.colorAccentViolet
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
                     }
@@ -766,7 +1263,7 @@ Rectangle {
                     }
                     contentItem: Text {
                         text: btnClearCaptions.text
-                        font.pixelSize: 9
+                        font.pixelSize: 13
                         font.bold: true
                         color: "#FF5252"
                         horizontalAlignment: Text.AlignHCenter
@@ -781,7 +1278,7 @@ Rectangle {
                 Layout.fillWidth: true
                 placeholderText: "Search lyrics..."
                 color: rootWindow.colorTextPrimary
-                font.pixelSize: 11
+                font.pixelSize: 15
                 background: Rectangle {
                     color: "#16161D"
                     border.color: rootWindow.colorBorder
@@ -840,7 +1337,7 @@ Rectangle {
                             }
                             contentItem: Text {
                                 text: btnTimeNav.text
-                                font.pixelSize: 9
+                                font.pixelSize: 13
                                 color: rootWindow.colorAccentGreen
                                 font.family: "Courier New"
                                 font.bold: true
@@ -860,7 +1357,7 @@ Rectangle {
                             Layout.fillHeight: true
                             text: model.clipLyricText
                             color: rootWindow.colorTextPrimary
-                            font.pixelSize: 11
+                            font.pixelSize: 15
                             placeholderText: "(empty)"
                             background: Rectangle {
                                 color: captionTxtField.activeFocus ? "#0D0D11" : "transparent"
@@ -888,7 +1385,7 @@ Rectangle {
                                     timelineManager.setDirty(true);
                                 }
                                 background: Rectangle { color: "#2A2A35"; radius: 2 }
-                                contentItem: Text { text: "-.1s"; font.pixelSize: 8; color: "#FFF"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                contentItem: Text { text: "-.1s"; font.pixelSize: 12; color: "#FFF"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                             }
                             
                             Button {
@@ -901,7 +1398,7 @@ Rectangle {
                                     timelineManager.setDirty(true);
                                 }
                                 background: Rectangle { color: "#2A2A35"; radius: 2 }
-                                contentItem: Text { text: "+.1s"; font.pixelSize: 8; color: "#FFF"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                contentItem: Text { text: "+.1s"; font.pixelSize: 12; color: "#FFF"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                             }
                         }
                         
@@ -917,7 +1414,7 @@ Rectangle {
                             }
                             contentItem: Text {
                                 text: btnDeleteCap.text
-                                font.pixelSize: 11
+                                font.pixelSize: 15
                                 font.bold: true
                                 color: "#EF5350"
                                 horizontalAlignment: Text.AlignHCenter
@@ -938,7 +1435,7 @@ Rectangle {
             // Subtitle Styles Customizer Pane
             Rectangle {
                 Layout.fillWidth: true
-                implicitHeight: 220
+                implicitHeight: 260
                 color: rootWindow.colorBgCard
                 border.color: rootWindow.colorBorder
                 border.width: 1
@@ -952,9 +1449,29 @@ Rectangle {
                     Label {
                         text: "TITLER SUBTITLE CUSTOMIZER"
                         font.bold: true
-                        font.pixelSize: 10
+                        font.pixelSize: 14
                         color: rootWindow.colorAccentViolet
                         Layout.fillWidth: true
+                    }
+
+                    ColumnLayout {
+                        spacing: 2
+                        Layout.fillWidth: true
+                        Label {
+                            text: "Lyric Presentation Mode"
+                            font.pixelSize: 13
+                            color: rootWindow.colorTextSecondary
+                        }
+                        ComboBox {
+                            id: lyricModeCombo
+                            Layout.fillWidth: true
+                            implicitHeight: 26
+                            model: ["Bottom Two-Line", "Center Scrolling Queue", "Word Bounce rhythm", "Cinematic Full-Screen"]
+                            currentIndex: timelineManager.lyricDisplayMode
+                            onActivated: (index) => {
+                                timelineManager.lyricDisplayMode = index;
+                            }
+                        }
                     }
                     
                     // Row 1: Font and Font Size
@@ -967,7 +1484,7 @@ Rectangle {
                             Layout.fillWidth: true
                             Label {
                                 text: "Font Family"
-                                font.pixelSize: 9
+                                font.pixelSize: 13
                                 color: rootWindow.colorTextSecondary
                             }
                             ComboBox {
@@ -987,7 +1504,7 @@ Rectangle {
                             Layout.fillWidth: true
                             Label {
                                 text: "Font Size: " + timelineManager.subtitleFontSize + "px"
-                                font.pixelSize: 9
+                                font.pixelSize: 13
                                 color: rootWindow.colorTextSecondary
                             }
                             Slider {
@@ -1015,7 +1532,7 @@ Rectangle {
                             Layout.fillWidth: true
                             Label {
                                 text: "Fill Color"
-                                font.pixelSize: 9
+                                font.pixelSize: 13
                                 color: rootWindow.colorTextSecondary
                             }
                             RowLayout {
@@ -1047,7 +1564,7 @@ Rectangle {
                             Layout.fillWidth: true
                             Label {
                                 text: "Active Sweep"
-                                font.pixelSize: 9
+                                font.pixelSize: 13
                                 color: rootWindow.colorTextSecondary
                             }
                             RowLayout {
@@ -1080,7 +1597,7 @@ Rectangle {
                             Layout.fillWidth: true
                             Label {
                                 text: "Outline Color"
-                                font.pixelSize: 9
+                                font.pixelSize: 13
                                 color: rootWindow.colorTextSecondary
                             }
                             RowLayout {
@@ -1114,7 +1631,7 @@ Rectangle {
                         Layout.fillWidth: true
                         Label {
                             text: "Outline Width: " + timelineManager.subtitleOutlineWidth + "px"
-                            font.pixelSize: 9
+                            font.pixelSize: 13
                             color: rootWindow.colorTextSecondary
                         }
                         Slider {
@@ -1129,6 +1646,100 @@ Rectangle {
                                 timelineManager.subtitleOutlineWidth = Math.round(value);
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    // Restart confirmation dialog
+    Dialog {
+        id: restartDialog
+        title: "Restart Required"
+        modal: true
+        anchors.centerIn: parent
+        width: 320
+        standardButtons: Dialog.NoButton
+
+        background: Rectangle {
+            color: rootWindow.colorBgPanel
+            border.color: rootWindow.colorAccentViolet
+            border.width: 2
+            radius: 8
+        }
+
+        header: Rectangle {
+            color: rootWindow.colorBgCard
+            height: 35
+            width: parent.width
+            radius: 8
+
+            Label {
+                anchors.left: parent.left
+                anchors.leftMargin: 12
+                anchors.verticalCenter: parent.verticalCenter
+                text: "🔄 RESTART REQUIRED"
+                font.bold: true
+                font.pixelSize: 12
+                color: rootWindow.colorAccentViolet
+            }
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 12
+            Layout.margins: 12
+
+            Label {
+                text: "To apply the new video decoding preferences, the application needs to be restarted now."
+                color: rootWindow.colorTextPrimary
+                font.pixelSize: 12
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            RowLayout {
+                Layout.alignment: Qt.AlignRight
+                spacing: 8
+
+                Button {
+                    text: "Cancel"
+                    implicitWidth: 70
+                    implicitHeight: 26
+                    onClicked: restartDialog.close()
+                    background: Rectangle {
+                        color: "#222"
+                        radius: 4
+                        border.color: rootWindow.colorBorder
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        font.pixelSize: 11
+                        color: rootWindow.colorTextSecondary
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+
+                Button {
+                    text: "Restart Now"
+                    implicitWidth: 90
+                    implicitHeight: 26
+                    onClicked: {
+                        restartDialog.close();
+                        timelineManager.setDisableHwDecoding(!timelineManager.disableHwDecoding);
+                        timelineManager.restartApplication();
+                    }
+                    background: Rectangle {
+                        color: rootWindow.colorAccentViolet
+                        radius: 4
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        font.bold: true
+                        font.pixelSize: 11
+                        color: "#FFF"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
                     }
                 }
             }

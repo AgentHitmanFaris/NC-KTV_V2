@@ -79,7 +79,7 @@ Rectangle {
                 Label {
                     text: "TRACKS TIMELINE"
                     font.bold: true
-                    font.pixelSize: 11
+                    font.pixelSize: 15
                     color: rootWindow.colorTextSecondary
                 }
 
@@ -97,7 +97,7 @@ Rectangle {
                     }
                     contentItem: Text {
                         text: btnSnapToggle.text
-                        font.pixelSize: 9
+                        font.pixelSize: 13
                         font.bold: true
                         color: timelineRoot.snappingEnabled ? rootWindow.colorAccentGreen : "#FF5252"
                         horizontalAlignment: Text.AlignHCenter
@@ -119,7 +119,7 @@ Rectangle {
                     }
                     contentItem: Text {
                         text: btnAddAudio.text
-                        font.pixelSize: 9
+                        font.pixelSize: 13
                         font.bold: true
                         color: rootWindow.colorTextPrimary
                         horizontalAlignment: Text.AlignHCenter
@@ -140,7 +140,7 @@ Rectangle {
                     }
                     contentItem: Text {
                         text: btnAddVideo.text
-                        font.pixelSize: 9
+                        font.pixelSize: 13
                         font.bold: true
                         color: rootWindow.colorTextPrimary
                         horizontalAlignment: Text.AlignHCenter
@@ -161,7 +161,7 @@ Rectangle {
                     }
                     contentItem: Text {
                         text: btnAddLyrics.text
-                        font.pixelSize: 9
+                        font.pixelSize: 13
                         font.bold: true
                         color: rootWindow.colorTextPrimary
                         horizontalAlignment: Text.AlignHCenter
@@ -185,7 +185,7 @@ Rectangle {
                     }
                     contentItem: Text {
                         text: btnImportGlobalSrtLrc.text
-                        font.pixelSize: 9
+                        font.pixelSize: 13
                         font.bold: true
                         color: rootWindow.colorTextPrimary
                         horizontalAlignment: Text.AlignHCenter
@@ -210,7 +210,7 @@ Rectangle {
                     }
                     contentItem: Text {
                         text: btnCompactToggle.text
-                        font.pixelSize: 9
+                        font.pixelSize: 13
                         font.bold: true
                         color: timelineRoot.compactTracks ? "#FFF" : rootWindow.colorTextSecondary
                         horizontalAlignment: Text.AlignHCenter
@@ -224,13 +224,13 @@ Rectangle {
                     Label {
                         text: "Zoom"
                         color: rootWindow.colorTextSecondary
-                        font.pixelSize: 11
+                        font.pixelSize: 15
                     }
                     
                     // Zoom Out Button
                     Button {
                         id: btnZoomOut
-                        text: "➖"
+                        text: "-"
                         implicitWidth: 20
                         implicitHeight: 20
                         onClicked: zoomFactor = Math.max(20.0, zoomFactor - 20.0)
@@ -240,7 +240,7 @@ Rectangle {
                         }
                         contentItem: Text {
                             text: btnZoomOut.text
-                            font.pixelSize: 8
+                            font.pixelSize: 12
                             color: "#FFF"
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
@@ -259,7 +259,7 @@ Rectangle {
                     // Zoom In Button
                     Button {
                         id: btnZoomIn
-                        text: "➕"
+                        text: "+"
                         implicitWidth: 20
                         implicitHeight: 20
                         onClicked: zoomFactor = Math.min(500.0, zoomFactor + 20.0)
@@ -269,7 +269,7 @@ Rectangle {
                         }
                         contentItem: Text {
                             text: btnZoomIn.text
-                            font.pixelSize: 8
+                            font.pixelSize: 12
                             color: "#FFF"
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
@@ -362,25 +362,44 @@ Rectangle {
                             anchors.centerIn: parent
                             text: "TRACKS"
                             font.bold: true
-                            font.pixelSize: 10
+                            font.pixelSize: 14
                             color: rootWindow.colorTextSecondary
                         }
                     }
 
                     // Click or Drag gesture on the time ruler to scrub playhead (clamped to starting at x = 180 + contentX)
                     MouseArea {
+                        id: rulerScrubArea
                         anchors.fill: parent
+                        preventStealing: true
+                        hoverEnabled: true
+                        cursorShape: containsPress ? Qt.ClosedHandCursor : (mouseX >= 180 + timelineRoot.scrollX ? Qt.PointingHandCursor : Qt.ArrowCursor)
+
+                        property bool isDragging: false
+
                         onPressed: (mouse) => {
                             if (mouse.x < 180 + timelineRoot.scrollX) {
                                 mouse.accepted = false;
                                 return;
                             }
-                            var posX = Math.max(180 + timelineRoot.scrollX, mouse.x);
-                            var timeUs = xToTime(posX - 180);
-                            timelineManager.currentPlayheadTime = Math.max(0, timeUs);
+                            isDragging = true;
+                            mouse.accepted = true;
+                            scrub(mouse.x);
                         }
                         onPositionChanged: (mouse) => {
-                            var posX = Math.max(180 + timelineRoot.scrollX, mouse.x);
+                            if (isDragging) {
+                                scrub(mouse.x);
+                            }
+                        }
+                        onReleased: {
+                            isDragging = false;
+                        }
+                        onCanceled: {
+                            isDragging = false;
+                        }
+
+                        function scrub(mouseX) {
+                            var posX = Math.max(180 + timelineRoot.scrollX, mouseX);
                             var timeUs = xToTime(posX - 180);
                             timelineManager.currentPlayheadTime = Math.max(0, timeUs);
                         }
@@ -476,13 +495,13 @@ Rectangle {
                     
                     onEntered: (drag) => {
                         if (drag.hasUrls) {
-                            drag.acceptProposedAction();
+                            drag.accepted = true;
                         }
                     }
                     
                     onDropped: (drop) => {
                         if (drop.hasUrls) {
-                            drop.acceptProposedAction();
+                            drop.accepted = true;
                             
                             var trackHeight = timelineRoot.compactTracks ? 60 : 90;
                             var spacing = 1;

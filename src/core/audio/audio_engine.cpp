@@ -3,6 +3,8 @@
 #include "audio_engine.h"
 #include <iostream>
 #include <algorithm>
+#include <QThreadPool>
+#include <QRunnable>
 
 namespace ncktv {
 
@@ -48,7 +50,7 @@ AudioEngine::AudioEngine(TimelineManager* timelineManager, QObject* parent)
 
     // Track playhead moves done by user scrubbing to dynamically update playback samples
     connect(m_timelineManager, &TimelineManager::currentPlayheadTimeChanged, this, [this]() {
-        if (!m_isPlaying.load()) {
+        if (!m_isUpdatingPlayheadFromAudio) {
             qint64 currentMicroseconds = m_timelineManager->currentPlayheadTime();
             m_playbackSample.store((currentMicroseconds * 48000) / 1000000);
         }
@@ -138,26 +140,70 @@ void AudioEngine::stop() {
     m_playbackSample.store(0);
 }
 
+class PreloadRunnable : public QRunnable {
+public:
+    PreloadRunnable(AudioEngine* engine, const QString& filePath)
+        : m_engine(engine), m_filePath(filePath) {
+        setAutoDelete(true);
+    }
+
+    void run() override {
+        AudioReader* reader = new AudioReader();
+        bool success = reader->decodeFile(m_filePath, 48000);
+        // Safely notify the engine on the main thread
+        QMetaObject::invokeMethod(m_engine, "onFileDecoded",
+                                  Qt::QueuedConnection,
+                                  Q_ARG(QString, m_filePath),
+                                  Q_ARG(void*, reader),
+                                  Q_ARG(bool, success));
+    }
+private:
+    AudioEngine* m_engine;
+    QString m_filePath;
+};
+
 void AudioEngine::preloadFile(const QString& filePath) {
-    if (filePath.isEmpty() || m_audioCache.contains(filePath)) {
+    if (filePath.isEmpty()) {
         return;
     }
 
-    AudioReader* reader = new AudioReader();
-    // Synchronously decode for robust initial integration
-    if (reader->decodeFile(filePath, 48000)) {
+    std::lock_guard<std::mutex> lock(m_cacheMutex);
+    if (m_audioCache.contains(filePath) || m_loadingFiles.contains(filePath)) {
+        return;
+    }
+
+    m_loadingFiles.insert(filePath);
+
+    PreloadRunnable* task = new PreloadRunnable(this, filePath);
+    QThreadPool::globalInstance()->start(task);
+}
+
+void AudioEngine::onFileDecoded(const QString& filePath, void* readerPtr, bool success) {
+    AudioReader* reader = static_cast<AudioReader*>(readerPtr);
+
+    std::lock_guard<std::mutex> lock(m_cacheMutex);
+    m_loadingFiles.remove(filePath);
+
+    if (success && reader) {
+        if (m_audioCache.contains(filePath)) {
+            delete m_audioCache.take(filePath);
+        }
         m_audioCache[filePath] = reader;
+        std::cout << "[AudioEngine] Async decode finished successfully for file: " << filePath.toStdString() << "\n";
     } else {
         delete reader;
+        std::cerr << "[AudioEngine] Async decode failed for file: " << filePath.toStdString() << "\n";
     }
 }
 
 void AudioEngine::clearCache() {
+    std::lock_guard<std::mutex> lock(m_cacheMutex);
     qDeleteAll(m_audioCache);
     m_audioCache.clear();
 }
 
 AudioReader* AudioEngine::getReader(const QString& filePath) const {
+    std::lock_guard<std::mutex> lock(m_cacheMutex);
     return m_audioCache.value(filePath, nullptr);
 }
 
@@ -169,6 +215,7 @@ void AudioEngine::mixAudio(float* pOutput, unsigned int frameCount) {
         return;
     }
 
+    std::lock_guard<std::mutex> lock(m_cacheMutex);
     qint64 startSample = m_playbackSample.load();
     qint64 endSample = startSample + frameCount;
 
@@ -230,14 +277,22 @@ void AudioEngine::mixAudio(float* pOutput, unsigned int frameCount) {
     m_playbackSample.store(endSample);
 }
 
-void AudioEngine::mixOffline(float* pOutput, unsigned int frameCount, qint64 startSample) {
+void AudioEngine::mixOffline(float* pOutput, unsigned int frameCount, qint64 startSample, bool excludeVocals) {
     std::fill(pOutput, pOutput + frameCount * 2, 0.0f);
 
+    std::lock_guard<std::mutex> lock(m_cacheMutex);
     qint64 endSample = startSample + frameCount;
 
     for (Track* track : m_timelineManager->trackListModel()->tracks()) {
         if (track->trackType() != Track::Audio) {
             continue;
+        }
+
+        if (excludeVocals) {
+            QString nameLower = track->name().toLower();
+            if (nameLower.contains("vocals") || nameLower.contains("vocal")) {
+                continue; // Skip vocal track
+            }
         }
 
         float targetVol = (track->isMuted() ? 0.0f : track->volume()) * m_masterVolume;
@@ -284,7 +339,9 @@ void AudioEngine::updatePlayheadFromAudio() {
         qint64 microseconds = (currentSample * 1000000) / 48000;
         
         // Push microsecond updates to GUI thread smoothly
+        m_isUpdatingPlayheadFromAudio = true;
         m_timelineManager->setCurrentPlayheadTime(microseconds);
+        m_isUpdatingPlayheadFromAudio = false;
     }
 }
 
