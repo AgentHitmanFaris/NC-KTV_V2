@@ -16,6 +16,7 @@ class AudioEngine : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool isPlaying READ isPlaying WRITE setIsPlaying NOTIFY isPlayingChanged)
     Q_PROPERTY(float masterVolume READ masterVolume WRITE setMasterVolume NOTIFY masterVolumeChanged)
+    Q_PROPERTY(float playbackRate READ playbackRate WRITE setPlaybackRate NOTIFY playbackRateChanged)
 
 public:
     explicit AudioEngine(TimelineManager* timelineManager, QObject* parent = nullptr);
@@ -29,6 +30,9 @@ public:
 
     [[nodiscard]] float masterVolume() const { return m_masterVolume; }
     void setMasterVolume(float vol);
+
+    [[nodiscard]] float playbackRate() const { return m_playbackRate.load(); }
+    void setPlaybackRate(float rate);
 
     Q_INVOKABLE void play();
     Q_INVOKABLE void pause();
@@ -60,6 +64,7 @@ public:
 signals:
     void isPlayingChanged();
     void masterVolumeChanged();
+    void playbackRateChanged();
 
 private slots:
     void updatePlayheadFromAudio();
@@ -89,6 +94,9 @@ private:
 
     float m_masterVolume = 1.0f;
     bool m_isUpdatingPlayheadFromAudio = false;
+    
+    std::atomic<float> m_playbackRate{1.0f};
+    double m_playbackSampleAccumulator = 0.0;
 };
 
 } // namespace ncktv

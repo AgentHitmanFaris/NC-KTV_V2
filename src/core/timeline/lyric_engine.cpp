@@ -102,6 +102,10 @@ QVariantList LyricEngine::activeLineSyllables() const
             m[QStringLiteral("text")] = word.text;
             m[QStringLiteral("relativeStart")] = word.relativeStartUs;
             m[QStringLiteral("duration")] = word.durationUs;
+            m[QStringLiteral("x1")] = word.x1;
+            m[QStringLiteral("y1")] = word.y1;
+            m[QStringLiteral("x2")] = word.x2;
+            m[QStringLiteral("y2")] = word.y2;
             result.append(m);
         }
     }
@@ -192,6 +196,10 @@ void LyricEngine::rebuildLineCache()
                 wt.text = sylMap.value(QStringLiteral("text")).toString();
                 wt.relativeStartUs = sylMap.value(QStringLiteral("relativeStart")).toLongLong();
                 wt.durationUs = sylMap.value(QStringLiteral("duration")).toLongLong();
+                wt.x1 = sylMap.value(QStringLiteral("x1"), 0.25).toDouble();
+                wt.y1 = sylMap.value(QStringLiteral("y1"), 0.25).toDouble();
+                wt.x2 = sylMap.value(QStringLiteral("x2"), 0.75).toDouble();
+                wt.y2 = sylMap.value(QStringLiteral("y2"), 0.75).toDouble();
                 line.words.append(wt);
             }
 

@@ -173,4 +173,11 @@ void ClipListModel::refresh() {
     endResetModel();
 }
 
+Clip* ClipListModel::getClip(int row) const {
+    if (!m_track || row < 0 || row >= m_track->clips().size()) {
+        return nullptr;
+    }
+    return m_track->clips()[row];
+}
+
 } // namespace ncktv

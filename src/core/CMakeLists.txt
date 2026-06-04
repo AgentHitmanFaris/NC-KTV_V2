@@ -57,6 +57,10 @@ target_link_libraries(ncktv_core
         ffmpeg
 )
 
+if(WIN32)
+    target_link_libraries(ncktv_core PUBLIC dxgi)
+endif()
+
 if(TARGET onnx_shared)
     target_link_libraries(ncktv_core PUBLIC onnx_shared)
     target_compile_definitions(ncktv_core PUBLIC NCKTV_HAS_ONNX=1)

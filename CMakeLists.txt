@@ -39,14 +39,15 @@ FetchContent_MakeAvailable(nlohmann_json)
 # 2. ONNX Runtime (GPU build for high-performance stem separation)
 if(WIN32)
     set(ORT_VERSION "1.18.0")
-    message(STATUS "NC-KTV V2: Fetching ONNX Runtime v${ORT_VERSION} (win-x64-gpu)...")
+    message(STATUS "NC-KTV V2: Fetching ONNX Runtime v${ORT_VERSION} (win-x64-dml)...")
     FetchContent_Declare(onnxruntime
-        URL "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-win-x64-gpu-${ORT_VERSION}.zip"
+        URL "https://globalcdn.nuget.org/packages/microsoft.ml.onnxruntime.directml.1.18.0.nupkg"
+        DOWNLOAD_NAME "onnxruntime.zip"
     )
     FetchContent_MakeAvailable(onnxruntime)
 
-    set(ORT_DLL "${onnxruntime_SOURCE_DIR}/lib/onnxruntime.dll")
-    set(ORT_INC "${onnxruntime_SOURCE_DIR}/include")
+    set(ORT_DLL "${onnxruntime_SOURCE_DIR}/runtimes/win-x64/native/onnxruntime.dll")
+    set(ORT_INC "${onnxruntime_SOURCE_DIR}/build/native/include")
 
     add_library(onnx_shared SHARED IMPORTED GLOBAL)
     target_include_directories(onnx_shared INTERFACE "${ORT_INC}")
@@ -54,7 +55,7 @@ if(WIN32)
 
     if(MSVC)
         # MSVC uses the pre-built import library (.lib)
-        set_property(TARGET onnx_shared PROPERTY IMPORTED_IMPLIB "${onnxruntime_SOURCE_DIR}/lib/onnxruntime.lib")
+        set_property(TARGET onnx_shared PROPERTY IMPORTED_IMPLIB "${onnxruntime_SOURCE_DIR}/runtimes/win-x64/native/onnxruntime.lib")
     else()
         # MinGW: Resolve dlltool to generate .a import library
         set(ORT_IMPLIB "${CMAKE_BINARY_DIR}/libonnxruntime.a")

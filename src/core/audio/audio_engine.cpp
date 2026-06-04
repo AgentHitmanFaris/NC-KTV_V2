@@ -26,7 +26,8 @@ static void maAudioCallback(ma_device* pDevice, void* pOutput, const void* pInpu
 AudioEngine::AudioEngine(TimelineManager* timelineManager, QObject* parent)
     : QObject(parent),
       m_timelineManager(timelineManager),
-      m_syncTimer(new QTimer(this)) {
+      m_syncTimer(new QTimer(this)),
+      m_playbackSampleAccumulator(0.0) {
     
     s_instance = this;
 
@@ -88,6 +89,13 @@ void AudioEngine::setMasterVolume(float vol) {
     }
 }
 
+void AudioEngine::setPlaybackRate(float rate) {
+    if (m_playbackRate.load() != rate) {
+        m_playbackRate.store(rate);
+        emit playbackRateChanged();
+    }
+}
+
 void AudioEngine::setIsPlaying(bool playing) {
     if (playing) {
         play();
@@ -104,6 +112,7 @@ void AudioEngine::play() {
     // Synchronize playhead starting sample
     qint64 currentMicroseconds = m_timelineManager->currentPlayheadTime();
     m_playbackSample.store((currentMicroseconds * 48000) / 1000000);
+    m_playbackSampleAccumulator = static_cast<double>(m_playbackSample.load());
 
     m_isPlaying.store(true);
     
@@ -172,6 +181,15 @@ void AudioEngine::preloadFile(const QString& filePath) {
         return;
     }
 
+    // Try to load peak cache synchronously for immediate UI feedback
+    AudioReader* cacheReader = new AudioReader();
+    if (cacheReader->loadPeakCache(filePath)) {
+        m_audioCache[filePath] = cacheReader;
+        std::cout << "[AudioEngine] Loaded peak cache synchronously for: " << filePath.toStdString() << "\n";
+    } else {
+        delete cacheReader;
+    }
+
     m_loadingFiles.insert(filePath);
 
     PreloadRunnable* task = new PreloadRunnable(this, filePath);
@@ -186,10 +204,19 @@ void AudioEngine::onFileDecoded(const QString& filePath, void* readerPtr, bool s
 
     if (success && reader) {
         if (m_audioCache.contains(filePath)) {
-            delete m_audioCache.take(filePath);
+            AudioReader* cachedReader = m_audioCache[filePath];
+            if (cachedReader) {
+                // Merge decoded samples into the existing reader loaded from cache
+                cachedReader->setSamples(reader->samples());
+                delete reader;
+                std::cout << "[AudioEngine] Merged background decoded samples for: " << filePath.toStdString() << "\n";
+            } else {
+                m_audioCache[filePath] = reader;
+            }
+        } else {
+            m_audioCache[filePath] = reader;
+            std::cout << "[AudioEngine] Async decode finished successfully for file: " << filePath.toStdString() << "\n";
         }
-        m_audioCache[filePath] = reader;
-        std::cout << "[AudioEngine] Async decode finished successfully for file: " << filePath.toStdString() << "\n";
     } else {
         delete reader;
         std::cerr << "[AudioEngine] Async decode failed for file: " << filePath.toStdString() << "\n";
@@ -216,8 +243,15 @@ void AudioEngine::mixAudio(float* pOutput, unsigned int frameCount) {
     }
 
     std::lock_guard<std::mutex> lock(m_cacheMutex);
-    qint64 startSample = m_playbackSample.load();
-    qint64 endSample = startSample + frameCount;
+    
+    qint64 currentSampleInt = m_playbackSample.load();
+    if (std::abs(m_playbackSampleAccumulator - currentSampleInt) > 480) { // > 10ms diff
+        m_playbackSampleAccumulator = static_cast<double>(currentSampleInt);
+    }
+    
+    double startSample = m_playbackSampleAccumulator;
+    float speed = m_playbackRate.load();
+    double endSample = startSample + frameCount * speed;
 
     // Loop through tracks in parallel
     for (Track* track : m_timelineManager->trackListModel()->tracks()) {
@@ -235,34 +269,28 @@ void AudioEngine::mixAudio(float* pOutput, unsigned int frameCount) {
             qint64 clipStartSample = (clip->startTime() * 48000) / 1000000;
             qint64 clipEndSample = (clip->endTime() * 48000) / 1000000;
 
-            // Check sample-accurate boundary overlap
-            if (startSample < clipEndSample && clipStartSample < endSample) {
-                QString srcFile = clip->sourceFile();
-                if (!m_audioCache.contains(srcFile)) {
-                    continue; // Dynamic pre-load fail fallback
-                }
+            QString srcFile = clip->sourceFile();
+            if (!m_audioCache.contains(srcFile)) {
+                continue; // Dynamic pre-load fail fallback
+            }
 
-                AudioReader* reader = m_audioCache[srcFile];
-                const auto& samples = reader->samples();
-                if (samples.empty()) {
-                    continue;
-                }
+            AudioReader* reader = m_audioCache[srcFile];
+            const auto& samples = reader->samples();
+            if (samples.empty()) {
+                continue;
+            }
 
-                qint64 mixStart = (std::max)(startSample, clipStartSample);
-                qint64 mixEnd = (std::min)(endSample, clipEndSample);
+            qint64 srcStartSample = (clip->sourceStart() * 48000) / 1000000;
+            unsigned int rampLen = (std::min)(frameCount, 256u);
+            float gainStep = (targetVol - prevVol) / static_cast<float>(rampLen);
 
-                unsigned int rampLen = (std::min)(frameCount, 256u);
-                float gainStep = (targetVol - prevVol) / static_cast<float>(rampLen);
-
-                for (qint64 s = mixStart; s < mixEnd; ++s) {
-                    qint64 outFrameIdx = s - startSample;
-                    
-                    qint64 sampleOffsetInClip = s - clipStartSample;
-                    qint64 srcStartSample = (clip->sourceStart() * 48000) / 1000000;
-                    qint64 srcFrameIdx = srcStartSample + sampleOffsetInClip;
+            for (unsigned int outFrameIdx = 0; outFrameIdx < frameCount; ++outFrameIdx) {
+                double s = startSample + outFrameIdx * speed;
+                if (s >= clipStartSample && s < clipEndSample) {
+                    double sampleOffsetInClip = s - clipStartSample;
+                    qint64 srcFrameIdx = srcStartSample + static_cast<qint64>(sampleOffsetInClip);
 
                     if (srcFrameIdx >= 0 && srcFrameIdx < reader->totalSamples()) {
-                        // Compute smoothed sample-accurate volume envelope ramp
                         float gain = outFrameIdx < rampLen ? (prevVol + gainStep * outFrameIdx) : targetVol;
 
                         // Mix left/right channels additively with smoothed gain factor
@@ -274,7 +302,8 @@ void AudioEngine::mixAudio(float* pOutput, unsigned int frameCount) {
         }
     }
 
-    m_playbackSample.store(endSample);
+    m_playbackSampleAccumulator = endSample;
+    m_playbackSample.store(static_cast<qint64>(endSample));
 }
 
 void AudioEngine::mixOffline(float* pOutput, unsigned int frameCount, qint64 startSample, bool excludeVocals) {

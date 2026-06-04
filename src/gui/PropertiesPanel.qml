@@ -13,6 +13,37 @@ Rectangle {
     property int lyricsViewMode: 0 // 0 = Track list sheet, 1 = Clip details & syllables
     property real sylZoomFactor: 1.0
     property int selectedSylIdx: -1
+    property bool sylContiguousMode: true
+
+    function adjustSyllableRight(index, originalStart, originalDur, deltaUs) {
+        if (!selectedClip) return;
+        var newDur = Math.max(50000, originalDur + deltaUs);
+        var actualDeltaUs = newDur - originalDur;
+        
+        selectedClip.updateSyllable(index, originalStart, newDur);
+        
+        if (sylContiguousMode && index + 1 < selectedClip.syllables.length) {
+            var nextSyl = selectedClip.syllables[index + 1];
+            var nextStart = nextSyl.relativeStart + actualDeltaUs;
+            var nextDur = Math.max(50000, nextSyl.duration - actualDeltaUs);
+            selectedClip.updateSyllable(index + 1, nextStart, nextDur);
+        }
+    }
+
+    function adjustSyllableLeft(index, originalStart, originalDur, deltaUs) {
+        if (!selectedClip) return;
+        var newStart = Math.max(0, originalStart + deltaUs);
+        var actualDeltaUs = newStart - originalStart;
+        var newDur = Math.max(50000, originalDur - actualDeltaUs);
+        
+        selectedClip.updateSyllable(index, newStart, newDur);
+        
+        if (sylContiguousMode && index - 1 >= 0) {
+            var prevSyl = selectedClip.syllables[index - 1];
+            var prevDur = Math.max(50000, prevSyl.duration + actualDeltaUs);
+            selectedClip.updateSyllable(index - 1, prevSyl.relativeStart, prevDur);
+        }
+    }
 
     // Centrally computed active syllable index — avoids N per-delegate binding evaluations per playhead tick
     property int activeSylIdx: {
@@ -54,7 +85,7 @@ Rectangle {
         RowLayout {
             id: lyricsTabHeader
             Layout.fillWidth: true
-            visible: selectedTrack !== null && selectedTrack.trackType === 2 && selectedClip !== null
+            visible: selectedTrack !== null && selectedTrack.trackType === 2
             spacing: 8
             
             Button {
@@ -70,7 +101,7 @@ Rectangle {
                 }
                 contentItem: Text {
                     text: tabBtnTrack.text
-                    font.pixelSize: 14
+                    font.pixelSize: 13
                     font.bold: true
                     color: propsPanelRoot.lyricsViewMode === 0 ? "#FFF" : rootWindow.colorTextSecondary
                     horizontalAlignment: Text.AlignHCenter
@@ -83,17 +114,42 @@ Rectangle {
                 text: "Syllable Tuner"
                 Layout.fillWidth: true
                 implicitHeight: 26
+                enabled: selectedClip !== null
+                opacity: enabled ? 1.0 : 0.5
                 onClicked: propsPanelRoot.lyricsViewMode = 1
                 background: Rectangle {
-                    color: propsPanelRoot.lyricsViewMode === 1 ? "#2D264A" : "#16161D"
+                    color: propsPanelRoot.lyricsViewMode === 1 && tabBtnClip.enabled ? "#2D264A" : "#16161D"
                     radius: 3
-                    border.color: propsPanelRoot.lyricsViewMode === 1 ? rootWindow.colorAccentViolet : rootWindow.colorBorder
+                    border.color: propsPanelRoot.lyricsViewMode === 1 && tabBtnClip.enabled ? rootWindow.colorAccentViolet : rootWindow.colorBorder
                 }
                 contentItem: Text {
                     text: tabBtnClip.text
-                    font.pixelSize: 14
+                    font.pixelSize: 13
                     font.bold: true
-                    color: propsPanelRoot.lyricsViewMode === 1 ? "#FFF" : rootWindow.colorTextSecondary
+                    color: propsPanelRoot.lyricsViewMode === 1 && tabBtnClip.enabled ? "#FFF" : rootWindow.colorTextSecondary
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+
+            Button {
+                id: tabBtnAdvanced
+                text: "🎙️ Advanced Tuner"
+                Layout.fillWidth: true
+                implicitHeight: 26
+                onClicked: {
+                    lyricTunerWindow.showTunerForActiveSelection();
+                }
+                background: Rectangle {
+                    color: tabBtnAdvanced.hovered ? "#1B352E" : "#16161D"
+                    radius: 3
+                    border.color: rootWindow.colorAccentGreen
+                }
+                contentItem: Text {
+                    text: tabBtnAdvanced.text
+                    font.pixelSize: 13
+                    font.bold: true
+                    color: rootWindow.colorAccentGreen
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
                 }
@@ -599,7 +655,7 @@ Rectangle {
                     // Syllable Map Zoom Controls
                     RowLayout {
                         Layout.fillWidth: true
-                        spacing: 8
+                        spacing: 6
                         Label {
                             text: "Zoom:"
                             font.pixelSize: 13
@@ -639,6 +695,102 @@ Rectangle {
                             color: rootWindow.colorTextPrimary
                             Layout.preferredWidth: 25
                         }
+
+                        // Linked Contiguous Mode Button
+                        Button {
+                            id: btnContiguousMode
+                            text: propsPanelRoot.sylContiguousMode ? "🔗 Linked" : "🔓 Free"
+                            implicitWidth: 65
+                            implicitHeight: 22
+                            onClicked: propsPanelRoot.sylContiguousMode = !propsPanelRoot.sylContiguousMode
+                            background: Rectangle {
+                                color: propsPanelRoot.sylContiguousMode ? "#1B3A24" : "#222"
+                                radius: 3
+                                border.color: propsPanelRoot.sylContiguousMode ? rootWindow.colorAccentGreen : rootWindow.colorBorder
+                                border.width: 1
+                            }
+                            contentItem: Text {
+                                text: btnContiguousMode.text
+                                font.bold: true
+                                font.pixelSize: 11
+                                color: "#FFF"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                        }
+
+                        // Syllable Loop Button
+                        Button {
+                            id: btnLoopSyllable
+                            text: rootWindow.syllableLoopEnabled && rootWindow.syllableLoopStartUs !== selectedClip.startTime ? "⏹ Stop Syl" : "🔁 Loop Syl"
+                            implicitWidth: 72
+                            implicitHeight: 22
+                            enabled: selectedClip !== null && propsPanelRoot.selectedSylIdx !== -1
+                            onClicked: {
+                                if (rootWindow.syllableLoopEnabled && rootWindow.syllableLoopStartUs !== selectedClip.startTime) {
+                                    rootWindow.syllableLoopEnabled = false;
+                                    audioEngine.pause();
+                                } else {
+                                    var syl = selectedClip.syllables[propsPanelRoot.selectedSylIdx];
+                                    if (syl) {
+                                        rootWindow.syllableLoopStartUs = selectedClip.startTime + syl.relativeStart;
+                                        rootWindow.syllableLoopEndUs = rootWindow.syllableLoopStartUs + syl.duration;
+                                        timelineManager.currentPlayheadTime = rootWindow.syllableLoopStartUs;
+                                        rootWindow.syllableLoopEnabled = true;
+                                        audioEngine.play();
+                                    }
+                                }
+                            }
+                            background: Rectangle {
+                                color: (rootWindow.syllableLoopEnabled && rootWindow.syllableLoopStartUs !== selectedClip.startTime) ? "#C62828" : (btnLoopSyllable.hovered ? "#2D264A" : "#16161D")
+                                radius: 3
+                                border.color: (rootWindow.syllableLoopEnabled && rootWindow.syllableLoopStartUs !== selectedClip.startTime) ? "#FF5252" : rootWindow.colorAccentViolet
+                                border.width: 1
+                            }
+                            contentItem: Text {
+                                text: btnLoopSyllable.text
+                                font.bold: true
+                                font.pixelSize: 11
+                                color: "#FFF"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                        }
+
+                        // Clip Line Loop Button
+                        Button {
+                            id: btnLoopLine
+                            text: rootWindow.syllableLoopEnabled && rootWindow.syllableLoopStartUs === selectedClip.startTime ? "⏹ Stop Line" : "🔁 Loop Line"
+                            implicitWidth: 72
+                            implicitHeight: 22
+                            enabled: selectedClip !== null
+                            onClicked: {
+                                if (rootWindow.syllableLoopEnabled && rootWindow.syllableLoopStartUs === selectedClip.startTime) {
+                                    rootWindow.syllableLoopEnabled = false;
+                                    audioEngine.pause();
+                                } else {
+                                    rootWindow.syllableLoopStartUs = selectedClip.startTime;
+                                    rootWindow.syllableLoopEndUs = selectedClip.endTime;
+                                    timelineManager.currentPlayheadTime = rootWindow.syllableLoopStartUs;
+                                    rootWindow.syllableLoopEnabled = true;
+                                    audioEngine.play();
+                                }
+                            }
+                            background: Rectangle {
+                                color: (rootWindow.syllableLoopEnabled && rootWindow.syllableLoopStartUs === selectedClip.startTime) ? "#C62828" : (btnLoopLine.hovered ? "#2D264A" : "#16161D")
+                                radius: 3
+                                border.color: (rootWindow.syllableLoopEnabled && rootWindow.syllableLoopStartUs === selectedClip.startTime) ? "#FF5252" : rootWindow.colorAccentViolet
+                                border.width: 1
+                            }
+                            contentItem: Text {
+                                text: btnLoopLine.text
+                                font.bold: true
+                                font.pixelSize: 11
+                                color: "#FFF"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                        }
                     }
 
                     // Visual Horizontal Syllable Map
@@ -654,7 +806,7 @@ Rectangle {
                             id: sylFlickable
                             anchors.fill: parent
                             anchors.margins: 4
-                            contentWidth: sylRow.implicitWidth
+                            contentWidth: sylRow.width
                             contentHeight: parent.height - 8
                             clip: true
                             flickableDirection: Flickable.HorizontalFlick
@@ -663,16 +815,28 @@ Rectangle {
                                 policy: ScrollBar.AsNeeded
                             }
 
-                            Row {
+                            Item {
                                 id: sylRow
                                 height: parent.height - 6
-                                spacing: 2
+                                width: selectedClip ? (selectedClip.duration / 1000000.0) * 180.0 * propsPanelRoot.sylZoomFactor : 0
+
+                                // Real-time Playhead Indicator inside the Syllable Map
+                                Rectangle {
+                                    id: sylPlayheadIndicator
+                                    width: 2
+                                    height: parent.height
+                                    color: "#FF1744" // Bright neon red
+                                    z: 10
+                                    x: selectedClip ? ((timelineManager.currentPlayheadTime - selectedClip.startTime) / 1000000.0) * 180.0 * propsPanelRoot.sylZoomFactor : 0
+                                    visible: selectedClip && timelineManager.currentPlayheadTime >= selectedClip.startTime && timelineManager.currentPlayheadTime <= selectedClip.endTime
+                                }
 
                                 Repeater {
                                     model: selectedClip ? selectedClip.syllables : []
                                     delegate: Rectangle {
                                         height: parent.height
-                                        width: Math.max(50.0, (modelData.duration / 1000000.0) * 180.0 * propsPanelRoot.sylZoomFactor)
+                                        x: (modelData.relativeStart / 1000000.0) * 180.0 * propsPanelRoot.sylZoomFactor
+                                        width: Math.max(20.0, (modelData.duration / 1000000.0) * 180.0 * propsPanelRoot.sylZoomFactor)
                                         
                                         property bool isActive: propsPanelRoot.activeSylIdx === index
                                         property bool isSelected: propsPanelRoot.selectedSylIdx === index
@@ -703,11 +867,143 @@ Rectangle {
                                             }
                                         }
 
+                                        // Left Resize Handle
+                                        Rectangle {
+                                            width: 8
+                                            height: parent.height
+                                            anchors.left: parent.left
+                                            color: "transparent"
+                                            z: 5
+                                            
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                cursorShape: Qt.SizeHorCursor
+                                                
+                                                property real startParentX: 0
+                                                property real originalStart: 0
+                                                property real originalDur: 0
+                                                
+                                                onPressed: (mouse) => {
+                                                    var mapped = mapToItem(sylRow, mouse.x, mouse.y);
+                                                    startParentX = mapped.x;
+                                                    originalStart = modelData.relativeStart;
+                                                    originalDur = modelData.duration;
+                                                    propsPanelRoot.selectedSylIdx = index;
+                                                    sylListView.positionViewAtIndex(index, ListView.Contain);
+                                                }
+                                                
+                                                onPositionChanged: (mouse) => {
+                                                    var mapped = mapToItem(sylRow, mouse.x, mouse.y);
+                                                    var dx = mapped.x - startParentX;
+                                                    var deltaUs = (dx / (180.0 * propsPanelRoot.sylZoomFactor)) * 1000000.0;
+                                                    
+                                                    propsPanelRoot.adjustSyllableLeft(index, originalStart, originalDur, Math.round(deltaUs));
+                                                    
+                                                    // Live loop timing updates if loop is active
+                                                    if (rootWindow.syllableLoopEnabled) {
+                                                        if (rootWindow.syllableLoopStartUs === selectedClip.startTime) {
+                                                            // Line loop - boundaries don't change
+                                                        } else if (propsPanelRoot.selectedSylIdx === index) {
+                                                            var syl = selectedClip.syllables[index];
+                                                            rootWindow.syllableLoopStartUs = selectedClip.startTime + syl.relativeStart;
+                                                            rootWindow.syllableLoopEndUs = rootWindow.syllableLoopStartUs + syl.duration;
+                                                        }
+                                                    }
+                                                }
+                                                
+                                                onReleased: {
+                                                    timelineManager.setDirty(true);
+                                                }
+                                            }
+                                        }
+
+                                        // Drag the middle to shift start time
                                         MouseArea {
+                                            id: sylDragArea
                                             anchors.fill: parent
-                                            onClicked: {
+                                            anchors.leftMargin: 8
+                                            anchors.rightMargin: 8
+                                            cursorShape: Qt.SizeAll
+                                            
+                                            property real startParentX: 0
+                                            property real originalStart: 0
+                                            
+                                            onPressed: (mouse) => {
+                                                var mapped = mapToItem(sylRow, mouse.x, mouse.y);
+                                                startParentX = mapped.x;
+                                                originalStart = modelData.relativeStart;
                                                 propsPanelRoot.selectedSylIdx = index;
                                                 sylListView.positionViewAtIndex(index, ListView.Contain);
+                                            }
+                                            
+                                            onPositionChanged: (mouse) => {
+                                                var mapped = mapToItem(sylRow, mouse.x, mouse.y);
+                                                var dx = mapped.x - startParentX;
+                                                var deltaUs = (dx / (180.0 * propsPanelRoot.sylZoomFactor)) * 1000000.0;
+                                                var newStart = Math.max(0, originalStart + deltaUs);
+                                                selectedClip.updateSyllable(index, Math.round(newStart), modelData.duration);
+                                                
+                                                // Live loop timing updates if loop is active
+                                                if (rootWindow.syllableLoopEnabled) {
+                                                    if (rootWindow.syllableLoopStartUs === selectedClip.startTime) {
+                                                        // Line loop - boundaries don't change
+                                                    } else if (propsPanelRoot.selectedSylIdx === index) {
+                                                        rootWindow.syllableLoopStartUs = selectedClip.startTime + newStart;
+                                                        rootWindow.syllableLoopEndUs = rootWindow.syllableLoopStartUs + modelData.duration;
+                                                    }
+                                                }
+                                            }
+                                            
+                                            onReleased: {
+                                                timelineManager.setDirty(true);
+                                            }
+                                        }
+
+                                        // Right Resize Handle
+                                        Rectangle {
+                                            width: 8
+                                            height: parent.height
+                                            anchors.right: parent.right
+                                            color: "transparent"
+                                            z: 5
+                                            
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                cursorShape: Qt.SizeHorCursor
+                                                
+                                                property real startParentX: 0
+                                                property real originalDur: 0
+                                                
+                                                onPressed: (mouse) => {
+                                                    var mapped = mapToItem(sylRow, mouse.x, mouse.y);
+                                                    startParentX = mapped.x;
+                                                    originalDur = modelData.duration;
+                                                    propsPanelRoot.selectedSylIdx = index;
+                                                    sylListView.positionViewAtIndex(index, ListView.Contain);
+                                                }
+                                                
+                                                onPositionChanged: (mouse) => {
+                                                    var mapped = mapToItem(sylRow, mouse.x, mouse.y);
+                                                    var dx = mapped.x - startParentX;
+                                                    var deltaUs = (dx / (180.0 * propsPanelRoot.sylZoomFactor)) * 1000000.0;
+                                                    
+                                                    propsPanelRoot.adjustSyllableRight(index, modelData.relativeStart, originalDur, Math.round(deltaUs));
+                                                    
+                                                    // Live loop timing updates if loop is active
+                                                    if (rootWindow.syllableLoopEnabled) {
+                                                        if (rootWindow.syllableLoopStartUs === selectedClip.startTime) {
+                                                            // Line loop - boundaries don't change
+                                                        } else if (propsPanelRoot.selectedSylIdx === index) {
+                                                            var syl = selectedClip.syllables[index];
+                                                            rootWindow.syllableLoopStartUs = selectedClip.startTime + syl.relativeStart;
+                                                            rootWindow.syllableLoopEndUs = rootWindow.syllableLoopStartUs + syl.duration;
+                                                        }
+                                                    }
+                                                }
+                                                
+                                                onReleased: {
+                                                    timelineManager.setDirty(true);
+                                                }
                                             }
                                         }
                                     }
@@ -836,6 +1132,283 @@ Rectangle {
                                             }
                                             background: Rectangle { color: "#222"; radius: 2 }
                                             contentItem: Text { text: "+50ms"; font.pixelSize: 11; color: "#F0F0F5"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Cubic Bezier curve editor (only visible when a syllable is selected)
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
+                        visible: selectedClip !== null && selectedClip.clipType === 2 && propsPanelRoot.selectedSylIdx !== -1
+
+                        // Fetch the currently selected syllable data
+                        property var currentSyl: (selectedClip && propsPanelRoot.selectedSylIdx >= 0 && propsPanelRoot.selectedSylIdx < selectedClip.syllables.length) ? selectedClip.syllables[propsPanelRoot.selectedSylIdx] : null
+                        property real curveX1: currentSyl && currentSyl.x1 !== undefined ? currentSyl.x1 : 0.25
+                        property real curveY1: currentSyl && currentSyl.y1 !== undefined ? currentSyl.y1 : 0.25
+                        property real curveX2: currentSyl && currentSyl.x2 !== undefined ? currentSyl.x2 : 0.75
+                        property real curveY2: currentSyl && currentSyl.y2 !== undefined ? currentSyl.y2 : 0.75
+
+                        Label {
+                            text: "SYLLABLE SWEEP CURVE: \"" + (currentSyl ? currentSyl.text.trim() : "") + "\""
+                            font.bold: true
+                            font.pixelSize: 13
+                            color: rootWindow.colorTextSecondary
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 15
+
+                            // Canvas Area
+                            Rectangle {
+                                id: canvasContainer
+                                width: 160
+                                height: 160
+                                color: "#0F0F14"
+                                border.color: rootWindow.colorBorder
+                                border.width: 1
+                                radius: 6
+                                clip: true
+
+                                property real curveX1: parent.curveX1
+                                property real curveY1: parent.curveY1
+                                property real curveX2: parent.curveX2
+                                property real curveY2: parent.curveY2
+
+                                Canvas {
+                                    id: curveCanvas
+                                    anchors.fill: parent
+                                    anchors.margins: 10
+                                    
+                                    onPaint: {
+                                        var ctx = getContext("2d");
+                                        ctx.clearRect(0, 0, width, height);
+
+                                        // Draw grid lines
+                                        ctx.strokeStyle = "#22222E";
+                                        ctx.lineWidth = 1;
+                                        
+                                        // Vertical grid
+                                        for (var i = 0.25; i < 1.0; i += 0.25) {
+                                            ctx.beginPath();
+                                            ctx.moveTo(i * width, 0);
+                                            ctx.lineTo(i * width, height);
+                                            ctx.stroke();
+                                            
+                                            ctx.beginPath();
+                                            ctx.moveTo(0, i * height);
+                                            ctx.lineTo(width, i * height);
+                                            ctx.stroke();
+                                        }
+
+                                        // Draw Bezier curve
+                                        ctx.strokeStyle = rootWindow.colorAccentViolet;
+                                        ctx.lineWidth = 2.5;
+                                        ctx.beginPath();
+                                        ctx.moveTo(0, height);
+                                        ctx.bezierCurveTo(
+                                            canvasContainer.curveX1 * width, (1.0 - canvasContainer.curveY1) * height,
+                                            canvasContainer.curveX2 * width, (1.0 - canvasContainer.curveY2) * height,
+                                            width, 0
+                                        );
+                                        ctx.stroke();
+
+                                        // Draw lines to control points
+                                        ctx.strokeStyle = "#444";
+                                        ctx.lineWidth = 1;
+                                        
+                                        ctx.beginPath();
+                                        ctx.moveTo(0, height);
+                                        ctx.lineTo(canvasContainer.curveX1 * width, (1.0 - canvasContainer.curveY1) * height);
+                                        ctx.stroke();
+                                        
+                                        ctx.beginPath();
+                                        ctx.moveTo(width, 0);
+                                        ctx.lineTo(canvasContainer.curveX2 * width, (1.0 - canvasContainer.curveY2) * height);
+                                        ctx.stroke();
+
+                                        // Draw handle 1 (CP1)
+                                        ctx.fillStyle = rootWindow.colorAccentGreen;
+                                        ctx.beginPath();
+                                        ctx.arc(canvasContainer.curveX1 * width, (1.0 - canvasContainer.curveY1) * height, 5, 0, 2 * Math.PI);
+                                        ctx.fill();
+
+                                        // Draw handle 2 (CP2)
+                                        ctx.fillStyle = "#FF7043"; // Orange
+                                        ctx.beginPath();
+                                        ctx.arc(canvasContainer.curveX2 * width, (1.0 - canvasContainer.curveY2) * height, 5, 0, 2 * Math.PI);
+                                        ctx.fill();
+                                    }
+
+                                    Connections {
+                                        target: canvasContainer
+                                        function onCurveX1Changed() { curveCanvas.requestPaint(); }
+                                        function onCurveY1Changed() { curveCanvas.requestPaint(); }
+                                        function onCurveX2Changed() { curveCanvas.requestPaint(); }
+                                        function onCurveY2Changed() { curveCanvas.requestPaint(); }
+                                    }
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    
+                                    property int activeHandle: 0
+
+                                    onPressed: (mouse) => {
+                                        var mX = mouse.x - 10;
+                                        var mY = mouse.y - 10;
+                                        var w = curveCanvas.width;
+                                        var h = curveCanvas.height;
+
+                                        var cp1X = canvasContainer.curveX1 * w;
+                                        var cp1Y = (1.0 - canvasContainer.curveY1) * h;
+                                        var cp2X = canvasContainer.curveX2 * w;
+                                        var cp2Y = (1.0 - canvasContainer.curveY2) * h;
+
+                                        var dist1 = Math.sqrt((mX - cp1X) * (mX - cp1X) + (mY - cp1Y) * (mY - cp1Y));
+                                        var dist2 = Math.sqrt((mX - cp2X) * (mX - cp2X) + (mY - cp2Y) * (mY - cp2Y));
+
+                                        if (dist1 < 15 && dist1 < dist2) {
+                                            activeHandle = 1;
+                                        } else if (dist2 < 15) {
+                                            activeHandle = 2;
+                                        } else {
+                                            activeHandle = 0;
+                                        }
+                                    }
+
+                                    onPositionChanged: (mouse) => {
+                                        if (activeHandle === 0) return;
+                                        var mX = mouse.x - 10;
+                                        var mY = mouse.y - 10;
+                                        var w = curveCanvas.width;
+                                        var h = curveCanvas.height;
+
+                                        var nX = Math.max(0.0, Math.min(1.0, mX / w));
+                                        var nY = Math.max(0.0, Math.min(1.0, 1.0 - (mY / h)));
+
+                                        if (activeHandle === 1) {
+                                            selectedClip.updateSyllableCurve(propsPanelRoot.selectedSylIdx, nX, nY, canvasContainer.curveX2, canvasContainer.curveY2);
+                                        } else if (activeHandle === 2) {
+                                            selectedClip.updateSyllableCurve(propsPanelRoot.selectedSylIdx, canvasContainer.curveX1, canvasContainer.curveY1, nX, nY);
+                                        }
+                                    }
+
+                                    onReleased: {
+                                        activeHandle = 0;
+                                        timelineManager.setDirty(true);
+                                    }
+                                }
+                            }
+
+                            // Preset controls
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 6
+
+                                Label {
+                                    text: "PRESETS"
+                                    font.bold: true
+                                    font.pixelSize: 10
+                                    color: rootWindow.colorTextSecondary
+                                }
+
+                                GridLayout {
+                                    columns: 2
+                                    columnSpacing: 6
+                                    rowSpacing: 6
+                                    Layout.fillWidth: true
+
+                                    Button {
+                                        text: "Linear"
+                                        Layout.fillWidth: true
+                                        implicitHeight: 24
+                                        onClicked: {
+                                            selectedClip.updateSyllableCurve(propsPanelRoot.selectedSylIdx, 0.25, 0.25, 0.75, 0.75);
+                                            timelineManager.setDirty(true);
+                                        }
+                                        background: Rectangle { color: "#16161D"; border.color: "#333"; border.width: 1; radius: 3 }
+                                        contentItem: Text { text: parent.text; font.pixelSize: 11; color: "#F0F0F5"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                    }
+
+                                    Button {
+                                        text: "Ease In Out"
+                                        Layout.fillWidth: true
+                                        implicitHeight: 24
+                                        onClicked: {
+                                            selectedClip.updateSyllableCurve(propsPanelRoot.selectedSylIdx, 0.42, 0.0, 0.58, 1.0);
+                                            timelineManager.setDirty(true);
+                                        }
+                                        background: Rectangle { color: "#16161D"; border.color: "#333"; border.width: 1; radius: 3 }
+                                        contentItem: Text { text: parent.text; font.pixelSize: 11; color: "#F0F0F5"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                    }
+
+                                    Button {
+                                        text: "Ease In"
+                                        Layout.fillWidth: true
+                                        implicitHeight: 24
+                                        onClicked: {
+                                            selectedClip.updateSyllableCurve(propsPanelRoot.selectedSylIdx, 0.42, 0.0, 1.0, 1.0);
+                                            timelineManager.setDirty(true);
+                                        }
+                                        background: Rectangle { color: "#16161D"; border.color: "#333"; border.width: 1; radius: 3 }
+                                        contentItem: Text { text: parent.text; font.pixelSize: 11; color: "#F0F0F5"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                    }
+
+                                    Button {
+                                        text: "Ease Out"
+                                        Layout.fillWidth: true
+                                        implicitHeight: 24
+                                        onClicked: {
+                                            selectedClip.updateSyllableCurve(propsPanelRoot.selectedSylIdx, 0.0, 0.0, 0.58, 1.0);
+                                            timelineManager.setDirty(true);
+                                        }
+                                        background: Rectangle { color: "#16161D"; border.color: "#333"; border.width: 1; radius: 3 }
+                                        contentItem: Text { text: parent.text; font.pixelSize: 11; color: "#F0F0F5"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                    }
+
+                                    Button {
+                                        text: "Hold"
+                                        Layout.fillWidth: true
+                                        implicitHeight: 24
+                                        onClicked: {
+                                            selectedClip.updateSyllableCurve(propsPanelRoot.selectedSylIdx, 1.0, 0.0, 1.0, 0.0);
+                                            timelineManager.setDirty(true);
+                                        }
+                                        background: Rectangle { color: "#16161D"; border.color: "#333"; border.width: 1; radius: 3 }
+                                        contentItem: Text { text: parent.text; font.pixelSize: 11; color: "#F0F0F5"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                    }
+                                }
+
+                                RowLayout {
+                                    spacing: 8
+                                    Layout.topMargin: 4
+                                    
+                                    ColumnLayout {
+                                        spacing: 2
+                                        Label { text: "CP1 (X, Y)"; font.pixelSize: 10; color: rootWindow.colorTextSecondary }
+                                        Label {
+                                            text: canvasContainer.curveX1.toFixed(2) + ", " + canvasContainer.curveY1.toFixed(2)
+                                            font.family: "Courier New"
+                                            font.bold: true
+                                            font.pixelSize: 11
+                                            color: rootWindow.colorAccentGreen
+                                        }
+                                    }
+                                    
+                                    ColumnLayout {
+                                        spacing: 2
+                                        Label { text: "CP2 (X, Y)"; font.pixelSize: 10; color: rootWindow.colorTextSecondary }
+                                        Label {
+                                            text: canvasContainer.curveX2.toFixed(2) + ", " + canvasContainer.curveY2.toFixed(2)
+                                            font.family: "Courier New"
+                                            font.bold: true
+                                            font.pixelSize: 11
+                                            color: "#FF7043"
                                         }
                                     }
                                 }
@@ -1098,6 +1671,57 @@ Rectangle {
                     }
                 }
 
+                // Vocal Alignment Action Block
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    visible: selectedClip ? selectedClip.clipType === 0 : false
+                    spacing: 10
+
+                    Label {
+                        text: "VOCAL ALIGNMENT"
+                        font.bold: true
+                        font.pixelSize: 14
+                        color: rootWindow.colorTextSecondary
+                    }
+
+                    Button {
+                        id: btnAlignVocal
+                        text: "ALIGN WITH GUIDE TRACK"
+                        Layout.fillWidth: true
+                        implicitHeight: 36
+                        enabled: selectedClip && selectedClip.clipType === 0
+                        onClicked: {
+                            if (selectedClip) {
+                                var offsetSec = timelineManager.alignAudioClip(selectedClip.clipId);
+                                var offsetMs = Math.round(offsetSec * 1000);
+                                if (offsetMs !== 0) {
+                                    saveStatusText.text = "Audio aligned by " + (offsetMs > 0 ? "+" : "") + offsetMs + "ms";
+                                    saveTextAnim.start();
+                                } else {
+                                    saveStatusText.text = "Audio already aligned or no guide track found";
+                                    saveTextAnim.start();
+                                }
+                            }
+                        }
+                        background: Rectangle {
+                            color: btnAlignVocal.enabled ? 
+                                   (btnAlignVocal.hovered ? rootWindow.colorAccentViolet : "#2D264A") : 
+                                   "#111"
+                            radius: 4
+                            border.color: btnAlignVocal.enabled ? rootWindow.colorAccentViolet : "#222"
+                            border.width: 1
+                        }
+                        contentItem: Text {
+                            text: btnAlignVocal.text
+                            font.bold: true
+                            font.pixelSize: 13
+                            color: btnAlignVocal.enabled ? "#FFF" : "#666"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                    }
+                }
+
                 // Actions: Split & Delete
                 ColumnLayout {
                     Layout.fillWidth: true
@@ -1290,6 +1914,79 @@ Rectangle {
                     target: propsPanelRoot
                     function onSelectedTrackChanged() {
                         lyricSearchField.text = "";
+                    }
+                }
+            }
+
+            // Bulk Lyric Paste Section
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 4
+
+                Label {
+                    text: "BULK PASTE LYRICS"
+                    font.bold: true
+                    font.pixelSize: 12
+                    color: rootWindow.colorTextSecondary
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: 80
+                    color: "#16161D"
+                    border.color: rootWindow.colorBorder
+                    radius: 4
+
+                    TextArea {
+                        id: txtBulkLyrics
+                        anchors.fill: parent
+                        anchors.margins: 4
+                        placeholderText: "Paste raw lyric text here... Each line will become a subtitle clip spaced by 4 seconds."
+                        placeholderTextColor: "#444"
+                        color: rootWindow.colorTextPrimary
+                        font.pixelSize: 14
+                        wrapMode: TextArea.Wrap
+                        background: null
+                    }
+                }
+
+                Button {
+                    id: btnImportBulk
+                    text: "GENERATE TIMED CLIPS"
+                    Layout.fillWidth: true
+                    implicitHeight: 24
+                    onClicked: {
+                        if (txtBulkLyrics.text.trim() === "") return;
+                        var lines = txtBulkLyrics.text.split("\n");
+                        var playheadTime = timelineManager.currentPlayheadTime;
+                        var spacingUs = 4000000; // 4 seconds spacing
+                        
+                        var addedCount = 0;
+                        for (var i = 0; i < lines.length; ++i) {
+                            var lineText = lines[i].trim();
+                            if (lineText === "") continue;
+                            
+                            var clipStart = playheadTime + (addedCount * spacingUs);
+                            timelineManager.addClipToTrack(selectedTrack.trackId, "", 2, clipStart, 3000000, "", lineText);
+                            addedCount++;
+                        }
+                        
+                        txtBulkLyrics.text = "";
+                        timelineManager.setDirty(true);
+                    }
+                    background: Rectangle {
+                        color: btnImportBulk.hovered ? rootWindow.colorAccentViolet : "#2D264A"
+                        radius: 3
+                        border.color: rootWindow.colorAccentViolet
+                        border.width: 1
+                    }
+                    contentItem: Text {
+                        text: btnImportBulk.text
+                        font.bold: true
+                        font.pixelSize: 12
+                        color: "#FFF"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
                     }
                 }
             }

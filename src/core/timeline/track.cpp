@@ -87,6 +87,7 @@ bool Track::addClip(Clip* clip) {
     });
     connect(clip, &Clip::durationChanged, this, &Track::clipsChanged);
     connect(clip, &Clip::lyricTextChanged, this, &Track::clipsChanged);
+    connect(clip, &Clip::syllablesChanged, this, &Track::clipsChanged);
 
     emit clipAdded(clip);
     emit clipsChanged();
@@ -242,6 +243,9 @@ Track* Track::fromJson(const nlohmann::json& j, QObject* parent) {
                 });
                 emit track->clipsChanged();
             });
+            connect(clip, &Clip::durationChanged, track, &Track::clipsChanged);
+            connect(clip, &Clip::lyricTextChanged, track, &Track::clipsChanged);
+            connect(clip, &Clip::syllablesChanged, track, &Track::clipsChanged);
         }
     }
 

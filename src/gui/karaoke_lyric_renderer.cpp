@@ -18,6 +18,7 @@ KaraokeLyricRenderer::KaraokeLyricRenderer(QQuickItem* parent)
     // Enable active drawing flags for premium responsiveness
     setFlag(ItemHasContents, true);
     setAntialiasing(true);
+    setRenderTarget(QQuickPaintedItem::FramebufferObject);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -166,6 +167,10 @@ void KaraokeLyricRenderer::syncWithEngine()
             destWord.text = srcWord.text;
             destWord.startTime = (srcLine.startTimeUs + srcWord.relativeStartUs) / 1000;
             destWord.endTime = (srcLine.startTimeUs + srcWord.relativeStartUs + srcWord.durationUs) / 1000;
+            destWord.x1 = srcWord.x1;
+            destWord.y1 = srcWord.y1;
+            destWord.x2 = srcWord.x2;
+            destWord.y2 = srcWord.y2;
             destLine.words.append(destWord);
         }
         m_lyrics.append(destLine);
@@ -249,6 +254,10 @@ void KaraokeLyricRenderer::paint(QPainter* painter)
                 cw.text = w.text;
                 cw.startTime = w.startTime;
                 cw.endTime = w.endTime;
+                cw.x1 = w.x1;
+                cw.y1 = w.y1;
+                cw.x2 = w.x2;
+                cw.y2 = w.y2;
                 line.cachedWords.append(cw);
             }
             m_cachedLines.append(line);
@@ -415,24 +424,7 @@ void KaraokeLyricRenderer::renderBottomTwoLine(QPainter* painter)
 
 void KaraokeLyricRenderer::renderCenterScrollQueue(QPainter* painter)
 {
-    int activeIdx = findActiveLineIndex(m_currentTimestamp);
-    
-    // Determine which line index to center around
-    int centerIdx = activeIdx;
-    if (centerIdx < 0) {
-        // Fallback: look for the next upcoming line
-        for (int i = 0; i < m_cachedLines.size(); ++i) {
-            if (m_cachedLines[i].startTime > m_currentTimestamp) {
-                centerIdx = i;
-                break;
-            }
-        }
-    }
-    if (centerIdx < 0 && !m_cachedLines.isEmpty()) {
-        centerIdx = m_cachedLines.size() - 1;
-    }
-
-    if (centerIdx < 0) {
+    if (m_cachedLines.isEmpty()) {
         // Show waiting cues if list is empty
         QFont font(m_fontFamily, m_fontSize);
         font.setStyleHint(QFont::Serif);
@@ -443,26 +435,93 @@ void KaraokeLyricRenderer::renderCenterScrollQueue(QPainter* painter)
     }
 
     // Setup base layout parameters
-    qreal midY = boundingRect().height() / 2;
-    qreal midX = boundingRect().width() / 2;
-    qreal lineSpacing = m_fontSize * 2.0;
+    qreal midY = boundingRect().height() / 2.0;
+    qreal midX = boundingRect().width() / 2.0;
+    qreal spacing = m_fontSize * 2.2;
 
     QFont font(m_fontFamily, m_fontSize);
     font.setStyleHint(QFont::Serif);
+    font.setBold(true);
 
-    // Show up to 3 lines: Previous, Current, Next (paragraph block style)
-    for (int offset = -1; offset <= 1; ++offset) {
-        int idx = centerIdx + offset;
-        if (idx < 0 || idx >= m_cachedLines.size()) continue;
+    double focusPos = getContinuousFocusPosition(m_currentTimestamp);
+    int activeIdx = findActiveLineIndex(m_currentTimestamp);
 
+    int startIdx = 0;
+    int endIdx = m_cachedLines.size() - 1;
+
+    for (int idx = startIdx; idx <= endIdx; ++idx) {
         CachedLine& line = m_cachedLines[idx];
-        qreal yPos = midY + offset * lineSpacing;
+        const RenderCache& cache = line.getCache(font);
         
-        // Colors & opacity calculations
-        bool isActive = (idx == activeIdx);
-        QColor fill = isActive ? QColor(255, 255, 255, 255) : QColor(128, 128, 128, 128); // 100% white vs 50% opacity gray
+        // Smooth scrolling vertical coordinate calculation
+        qreal yPos = midY + (idx - focusPos) * spacing;
+        
+        // Skip rendering if it is completely off-screen
+        if (yPos < -spacing || yPos > boundingRect().height() + spacing) {
+            continue;
+        }
 
-        drawStyledText(painter, &line, line.text, QPointF(midX, yPos), font, fill, m_outlineColor, m_outlineWidth);
+        // Continuous opacity calculation based on distance from focus position
+        double d = idx - focusPos;
+        double opacity = 0.4;
+        if (d >= -1.0 && d < 0.0) {
+            opacity = 0.4 + 0.6 * (d + 1.0);
+        } else if (d >= 0.0 && d <= 1.0) {
+            opacity = 0.4 + 0.6 * (1.0 - d);
+        }
+
+        // Add soft edge fade out near top and bottom of the view bounds
+        qreal distFromCenter = std::abs(yPos - midY);
+        qreal fadeThreshold = boundingRect().height() * 0.35;
+        double edgeFade = 1.0;
+        if (distFromCenter > fadeThreshold) {
+            edgeFade = 1.0 - (distFromCenter - fadeThreshold) / (boundingRect().height() * 0.15);
+            edgeFade = qBound(0.0, edgeFade, 1.0);
+        }
+        opacity *= edgeFade;
+
+        if (opacity <= 0.0) continue;
+
+        QColor fill = QColor(255, 255, 255, static_cast<int>(opacity * 255));
+
+        painter->save();
+        painter->translate(midX, yPos);
+
+        // Draw background/inactive text
+        drawStyledText(painter, &line, line.text, QPointF(0, 0), font, fill, m_outlineColor, m_outlineWidth);
+
+        // Progressive sweep for the active line
+        bool isActive = (idx == activeIdx);
+        if (isActive) {
+            qreal sweepX = calculateSweepX(line, font);
+            qreal startX = -(cache.totalWidth / 2.0);
+            QRectF clipRect(startX - 10, -cache.totalHeight, (sweepX - startX) + 10, cache.totalHeight * 2);
+            
+            painter->save();
+            painter->setClipRect(clipRect);
+            QColor activeFillColor(255, 176, 0, static_cast<int>(opacity * 255)); // Gold
+            drawStyledText(painter, &line, line.text, QPointF(0, 0), font, activeFillColor, m_outlineColor, m_outlineWidth);
+            painter->restore();
+
+            // Guide cursor
+            if (m_showGuideCursor && sweepX > startX && sweepX < (cache.totalWidth / 2.0)) {
+                painter->save();
+                painter->setRenderHint(QPainter::Antialiasing, true);
+                QRadialGradient glow(QPointF(sweepX, 0), cache.totalHeight * 0.5);
+                glow.setColorAt(0.0, QColor(255, 165, 0, static_cast<int>(100 * opacity)));
+                glow.setColorAt(1.0, QColor(255, 165, 0, 0));
+                painter->setBrush(glow);
+                painter->setPen(Qt::NoPen);
+                painter->drawEllipse(QPointF(sweepX, 0), cache.totalHeight * 0.4, cache.totalHeight * 0.4);
+
+                QPen cursorPen(QColor(255, 215, 0, static_cast<int>(255 * opacity)), 2.5);
+                painter->setPen(cursorPen);
+                painter->drawLine(QPointF(sweepX, -cache.totalHeight * 0.4), QPointF(sweepX, cache.totalHeight * 0.4));
+                painter->restore();
+            }
+        }
+        
+        painter->restore();
     }
 }
 
@@ -472,8 +531,10 @@ void KaraokeLyricRenderer::renderCenterScrollQueue(QPainter* painter)
 
 void KaraokeLyricRenderer::renderWordBounce(QPainter* painter)
 {
-    // Background must be solid black for high contrast karaoke sweep
-    painter->fillRect(boundingRect(), QColor(0, 0, 0));
+    // Background must be solid black for high contrast karaoke sweep only if background is opaque
+    if (m_backgroundColor.alpha() > 0) {
+        painter->fillRect(boundingRect(), m_backgroundColor);
+    }
 
     int activeIdx = findActiveLineIndex(m_currentTimestamp);
 
@@ -603,55 +664,42 @@ void KaraokeLyricRenderer::renderWordBounce(QPainter* painter)
 
 void KaraokeLyricRenderer::renderCinematicFullScreen(QPainter* painter)
 {
-    // Apply Vignette and dark gradient background if enabled
-    if (m_vignetteEnabled) {
-        drawVignette(painter);
+    // Apply Vignette and dark gradient background if enabled and background is opaque
+    if (m_backgroundColor.alpha() > 0) {
+        if (m_vignetteEnabled) {
+            drawVignette(painter);
+        } else {
+            painter->fillRect(boundingRect(), QColor(15, 15, 20)); // Subtle dark blue-gray
+        }
     } else {
-        painter->fillRect(boundingRect(), QColor(15, 15, 20)); // Subtle dark blue-gray
+        // Draw only the soft radial vignette over the transparent background
+        if (m_vignetteEnabled) {
+            QRectF rect = boundingRect();
+            QRadialGradient vignette(rect.center(), std::max(rect.width(), rect.height()) * 0.7);
+            vignette.setColorAt(0.0, QColor(0, 0, 0, 0));
+            vignette.setColorAt(0.7, QColor(0, 0, 0, 50));
+            vignette.setColorAt(1.0, QColor(0, 0, 0, 220)); // Soft cinematic shadow frame
+            painter->fillRect(rect, vignette);
+        }
     }
 
-    int activeIdx = findActiveLineIndex(m_currentTimestamp);
-
-    qreal midY = boundingRect().height() / 2.0;
-    qreal midX = boundingRect().width() / 2.0;
-    qreal spacing = m_fontSize * 2.2;
-
-    QFont font(m_fontFamily, m_fontSize);
-    font.setStyleHint(QFont::Serif);
-
     if (m_cachedLines.isEmpty()) {
-        drawStyledText(painter, nullptr, "(Waiting for lyric cues)", QPointF(midX, midY), font, QColor(128, 128, 128, 128), m_outlineColor, m_outlineWidth);
+        QFont font(m_fontFamily, m_fontSize);
+        font.setStyleHint(QFont::Serif);
+        drawStyledText(painter, nullptr, "(Waiting for lyric cues)", boundingRect().center(), font, QColor(128, 128, 128, 128), m_outlineColor, m_outlineWidth);
         return;
     }
 
-    // Determine the focus line index
-    int focusIdx = activeIdx;
-    if (focusIdx < 0) {
-        for (int i = 0; i < m_cachedLines.size(); ++i) {
-            if (m_cachedLines[i].startTime > m_currentTimestamp) {
-                focusIdx = i;
-                break;
-            }
-        }
-    }
-    if (focusIdx < 0) {
-        focusIdx = m_cachedLines.size() - 1;
-    }
+    qreal midY = boundingRect().height() / 2.0;
+    qreal midX = boundingRect().width() / 2.0;
+    qreal spacing = m_fontSize * 2.5; // Slightly larger spacing for cinema mode
 
-    // Calculate transition progress (interpolator)
-    double t = 1.0;
-    const qint64 transitionDurationMs = 300; // Smooth 300ms transition
+    QFont font(m_fontFamily, m_fontSize);
+    font.setStyleHint(QFont::Serif);
+    font.setBold(true);
 
-    if (focusIdx >= 0) {
-        qint64 lineStart = m_cachedLines[focusIdx].startTime;
-        qint64 diff = m_currentTimestamp - lineStart;
-        if (diff >= 0 && diff < transitionDurationMs) {
-            t = static_cast<double>(diff) / transitionDurationMs;
-        }
-    }
-
-    // Smooth transition easing curve (Cubic Out / Quad In-Out)
-    double tSmooth = t * t * (3.0 - 2.0 * t);
+    double focusPos = getContinuousFocusPosition(m_currentTimestamp);
+    int activeIdx = findActiveLineIndex(m_currentTimestamp);
 
     // Dynamic scale pulse factor for focus lyric (gentle breathing pulse)
     double pulseFactor = 1.0;
@@ -659,84 +707,99 @@ void KaraokeLyricRenderer::renderCinematicFullScreen(QPainter* painter)
         pulseFactor = 1.0 + 0.025 * std::sin(2.0 * M_PI * (m_currentTimestamp % 2500) / 2500.0);
     }
 
-    // Show Previous lyric
-    int prevIdx = focusIdx - 1;
-    if (prevIdx >= 0) {
-        CachedLine& line = m_cachedLines[prevIdx];
+    int startIdx = 0;
+    int endIdx = m_cachedLines.size() - 1;
 
-        // Previous animates upwards and fades out
-        qreal fromY = midY - spacing;
-        qreal toY = midY - spacing * 1.5;
-        qreal y = fromY + (toY - fromY) * (1.0 - tSmooth);
+    for (int idx = startIdx; idx <= endIdx; ++idx) {
+        CachedLine& line = m_cachedLines[idx];
+        const RenderCache& cache = line.getCache(font);
 
-        double fromScale = 0.8;
-        double toScale = 0.6;
-        double scale = fromScale + (toScale - fromScale) * (1.0 - tSmooth);
+        // Smooth scroll position calculation
+        qreal y = midY + (idx - focusPos) * spacing;
 
-        double fromOpacity = 0.35;
-        double toOpacity = 0.0;
-        double opacity = fromOpacity + (toOpacity - fromOpacity) * (1.0 - tSmooth);
+        // Skip rendering if it is completely off-screen
+        if (y < -spacing || y > boundingRect().height() + spacing) {
+            continue;
+        }
+
+        // Continuous scale & opacity calculation based on distance from focus position
+        double d = idx - focusPos;
+        double scale = 0.75;
+        double opacity = 0.3;
+
+        if (d < -1.0) {
+            double factor = qBound(0.0, (d - (-5.0)) / 4.0, 1.0);
+            scale = 0.75 * (0.7 + 0.3 * factor);
+            opacity = 0.3 * factor;
+        } else if (d >= -1.0 && d < 0.0) {
+            double t = d + 1.0;
+            scale = 0.75 + (1.15 * pulseFactor - 0.75) * t;
+            opacity = 0.3 + 0.7 * t;
+        } else if (d >= 0.0 && d <= 1.0) {
+            double t = d;
+            scale = 1.15 * pulseFactor + (0.75 - 1.15 * pulseFactor) * t;
+            opacity = 1.0 + (0.3 - 1.0) * t;
+        } else if (d > 1.0 && d <= 2.0) {
+            double t = d - 1.0;
+            scale = 0.75 + (0.5 - 0.75) * t;
+            opacity = 0.3 + (0.1 - 0.3) * t;
+        } else { // d > 2.0
+            double factor = qBound(0.0, 1.0 - (d - 2.0) * 0.25, 1.0);
+            scale = 0.5 * (0.7 + 0.3 * factor);
+            opacity = 0.1 * factor;
+        }
+
+        // Edge fading at top and bottom bounds
+        qreal distFromCenter = std::abs(y - midY);
+        qreal fadeThreshold = boundingRect().height() * 0.35;
+        double edgeFade = 1.0;
+        if (distFromCenter > fadeThreshold) {
+            edgeFade = 1.0 - (distFromCenter - fadeThreshold) / (boundingRect().height() * 0.15);
+            edgeFade = qBound(0.0, edgeFade, 1.0);
+        }
+        opacity *= edgeFade;
+
+        if (opacity <= 0.0) continue;
 
         painter->save();
         painter->translate(midX, y);
         painter->scale(scale, scale);
-        
-        QColor fill = QColor(200, 200, 200, static_cast<int>(opacity * 255));
-        drawStyledText(painter, &line, line.text, QPointF(0, 0), font, fill, m_outlineColor, m_outlineWidth);
-        painter->restore();
-    }
 
-    // Show Current focused lyric
-    if (focusIdx >= 0 && focusIdx < m_cachedLines.size()) {
-        CachedLine& line = m_cachedLines[focusIdx];
-
-        // Animates from upcoming position to center focus
-        qreal fromY = midY + spacing;
-        qreal toY = midY;
-        qreal y = fromY + (toY - fromY) * tSmooth;
-
-        double fromScale = 0.8;
-        double toScale = 1.15 * pulseFactor;
-        double scale = fromScale + (toScale - fromScale) * tSmooth;
-
-        double fromOpacity = 0.35;
-        double toOpacity = 1.0;
-        double opacity = fromOpacity + (toOpacity - fromOpacity) * tSmooth;
-
-        painter->save();
-        painter->translate(midX, y);
-        painter->scale(scale, scale);
-
-        // Bright white active fill with subtle glow
+        // Draw background/inactive text
         QColor fill = QColor(255, 255, 255, static_cast<int>(opacity * 255));
         drawStyledText(painter, &line, line.text, QPointF(0, 0), font, fill, m_outlineColor, m_outlineWidth);
-        painter->restore();
-    }
 
-    // Show Upcoming lyric
-    int nextIdx = focusIdx + 1;
-    if (nextIdx < m_cachedLines.size()) {
-        CachedLine& line = m_cachedLines[nextIdx];
+        // Draw progressive sweep for active line (idx == activeIdx)
+        bool isActive = (idx == activeIdx);
+        if (isActive) {
+            qreal sweepX = calculateSweepX(line, font);
+            qreal startX = -(cache.totalWidth / 2.0);
+            QRectF clipRect(startX - 10, -cache.totalHeight, (sweepX - startX) + 10, cache.totalHeight * 2);
 
-        // Upcoming animates to center or slides into queue
-        qreal fromY = midY + spacing * 2.0;
-        qreal toY = midY + spacing;
-        qreal y = fromY + (toY - fromY) * tSmooth;
+            painter->save();
+            painter->setClipRect(clipRect);
+            QColor activeFillColor(255, 176, 0, static_cast<int>(opacity * 255)); // Gold
+            drawStyledText(painter, &line, line.text, QPointF(0, 0), font, activeFillColor, m_outlineColor, m_outlineWidth);
+            painter->restore();
 
-        double fromScale = 0.0;
-        double toScale = 0.8;
-        double scale = fromScale + (toScale - fromScale) * tSmooth;
+            // Guide cursor
+            if (m_showGuideCursor && sweepX > startX && sweepX < (cache.totalWidth / 2.0)) {
+                painter->save();
+                painter->setRenderHint(QPainter::Antialiasing, true);
+                QRadialGradient glow(QPointF(sweepX, 0), cache.totalHeight * 0.5);
+                glow.setColorAt(0.0, QColor(255, 165, 0, static_cast<int>(100 * opacity)));
+                glow.setColorAt(1.0, QColor(255, 165, 0, 0));
+                painter->setBrush(glow);
+                painter->setPen(Qt::NoPen);
+                painter->drawEllipse(QPointF(sweepX, 0), cache.totalHeight * 0.4, cache.totalHeight * 0.4);
 
-        double fromOpacity = 0.0;
-        double toOpacity = 0.35;
-        double opacity = fromOpacity + (toOpacity - fromOpacity) * tSmooth;
+                QPen cursorPen(QColor(255, 215, 0, static_cast<int>(255 * opacity)), 2.5);
+                painter->setPen(cursorPen);
+                painter->drawLine(QPointF(sweepX, -cache.totalHeight * 0.4), QPointF(sweepX, cache.totalHeight * 0.4));
+                painter->restore();
+            }
+        }
 
-        painter->save();
-        painter->translate(midX, y);
-        painter->scale(scale, scale);
-
-        QColor fill = QColor(180, 180, 180, static_cast<int>(opacity * 255));
-        drawStyledText(painter, &line, line.text, QPointF(0, 0), font, fill, m_outlineColor, m_outlineWidth);
         painter->restore();
     }
 }
@@ -940,6 +1003,146 @@ void KaraokeLyricRenderer::drawStyledText(QPainter* painter, CachedLine* line, c
     painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
     painter->drawImage(imgPos, img);
     painter->restore();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sweep Offset Calculator (local coordinate space)
+// ─────────────────────────────────────────────────────────────────────────────
+
+qreal KaraokeLyricRenderer::calculateSweepX(const CachedLine& line, const QFont& font) const
+{
+    const RenderCache& cache = line.getCache(font);
+    qreal startX = -(cache.totalWidth / 2.0);
+    qreal endX = cache.totalWidth / 2.0;
+
+    qint64 lineDuration = line.endTime - line.startTime;
+    qint64 elapsed = m_currentTimestamp - line.startTime;
+
+    if (cache.cachedWords.isEmpty()) {
+        double progress = (lineDuration > 0) ? qBound(0.0, static_cast<double>(elapsed) / lineDuration, 1.0) : 1.0;
+        return startX + progress * cache.totalWidth;
+    }
+
+    if (m_currentTimestamp < cache.cachedWords.first().startTime) {
+        return startX;
+    } else if (m_currentTimestamp >= cache.cachedWords.last().endTime) {
+        return endX;
+    }
+
+    for (int i = 0; i < cache.cachedWords.size(); ++i) {
+        const auto& w = cache.cachedWords[i];
+        if (m_currentTimestamp >= w.startTime && m_currentTimestamp <= w.endTime) {
+            qint64 wDuration = w.endTime - w.startTime;
+            double wordProg = (wDuration > 0) ? qBound(0.0, static_cast<double>(m_currentTimestamp - w.startTime) / wDuration, 1.0) : 1.0;
+            double curvedProg = solveBezier(wordProg, w.x1, w.y1, w.x2, w.y2);
+            return startX + w.leftX + curvedProg * (w.rightX - w.leftX);
+        } else if (i < cache.cachedWords.size() - 1 && 
+                   m_currentTimestamp > w.endTime && 
+                   m_currentTimestamp < cache.cachedWords[i+1].startTime) {
+            const auto& nextW = cache.cachedWords[i+1];
+            qint64 gap = nextW.startTime - w.endTime;
+            double gapProg = (gap > 0) ? qBound(0.0, static_cast<double>(m_currentTimestamp - w.endTime) / gap, 1.0) : 1.0;
+            return startX + w.rightX + gapProg * (nextW.leftX - w.rightX);
+        }
+    }
+
+    return endX;
+}
+
+double KaraokeLyricRenderer::solveBezier(double x, double x1, double y1, double x2, double y2) const
+{
+    if (x <= 0.0) return 0.0;
+    if (x >= 1.0) return 1.0;
+
+    x1 = qBound(0.0, x1, 1.0);
+    x2 = qBound(0.0, x2, 1.0);
+
+    double t = x; // Initial guess
+    double A = 3.0 * x1 - 3.0 * x2 + 1.0;
+    double B = 3.0 * x2 - 6.0 * x1;
+    double C = 3.0 * x1;
+
+    for (int i = 0; i < 8; ++i) {
+        double xVal = ((A * t + B) * t + C) * t;
+        double dx = (3.0 * A * t + 2.0 * B) * t + C;
+        if (std::abs(dx) < 1e-6) break;
+        double diff = xVal - x;
+        t -= diff / dx;
+        t = qBound(0.0, t, 1.0);
+    }
+
+    double finalX = ((A * t + B) * t + C) * t;
+    if (std::abs(finalX - x) > 1e-3) {
+        double lo = 0.0;
+        double hi = 1.0;
+        t = x;
+        for (int i = 0; i < 16; ++i) {
+            double xVal = ((A * t + B) * t + C) * t;
+            if (std::abs(xVal - x) < 1e-4) break;
+            if (xVal < x) {
+                lo = t;
+            } else {
+                hi = t;
+            }
+            t = (lo + hi) / 2.0;
+        }
+    }
+
+    double Ay = 3.0 * y1 - 3.0 * y2 + 1.0;
+    double By = 3.0 * y2 - 6.0 * y1;
+    double Cy = 3.0 * y1;
+    return ((Ay * t + By) * t + Cy) * t;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Continuous Focus Position Calculator
+// ─────────────────────────────────────────────────────────────────────────────
+
+double KaraokeLyricRenderer::getContinuousFocusPosition(qint64 t) const
+{
+    int N = m_cachedLines.size();
+    if (N == 0) return 0.0;
+
+    // Find largest index i such that t >= m_cachedLines[i].startTime
+    int i = -1;
+    for (int idx = 0; idx < N; ++idx) {
+        if (t >= m_cachedLines[idx].startTime) {
+            i = idx;
+        } else {
+            break;
+        }
+    }
+
+    if (i == -1) {
+        // Before the first line
+        qint64 start0 = m_cachedLines[0].startTime;
+        const qint64 transitionMs = 500;
+        if (t >= start0 - transitionMs) {
+            double progress = static_cast<double>(t - (start0 - transitionMs)) / transitionMs;
+            double tSmooth = progress * progress * (3.0 - 2.0 * progress);
+            return -1.0 + tSmooth;
+        }
+        return -1.0;
+    } else if (i == N - 1) {
+        return static_cast<double>(N - 1);
+    } else {
+        qint64 startCurrent = m_cachedLines[i].startTime;
+        qint64 endCurrent = m_cachedLines[i].endTime;
+        qint64 startNext = m_cachedLines[i + 1].startTime;
+        const qint64 transitionMs = 500;
+
+        qint64 halfPoint = startCurrent + (endCurrent - startCurrent) / 2;
+        qint64 scrollStart = std::max(halfPoint, startNext - transitionMs);
+        qint64 scrollEnd = startNext;
+
+        if (t >= scrollStart && scrollEnd > scrollStart) {
+            double progress = static_cast<double>(t - scrollStart) / (scrollEnd - scrollStart);
+            progress = qBound(0.0, progress, 1.0);
+            double tSmooth = progress * progress * (3.0 - 2.0 * progress);
+            return i + tSmooth;
+        }
+        return static_cast<double>(i);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

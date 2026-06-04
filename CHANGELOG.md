@@ -42,6 +42,15 @@ All notable changes to this project will be documented in this file.
 - "New Project" button (`btnNew`) and action flow in the main header toolbar that resets the workspace tracks layout, timeline manager, active metadata, and selection, with dialog prompts to prevent losing unsaved changes.
 - C++ `TimelineManager::timelineChanged()` signal that acts as a single gateway to propagate track `clipsChanged`, clip `durationChanged`, and clip `lyricTextChanged` events to QML.
 - Automatic metadata guesser in C++ `TimelineManager` that parses imported media filenames to extract and capitalize clean Song Title and Artist Name metadata.
+- Automated unit tests in `timeline_test.cpp` for Metadata Guesser/Filename Parser, Hardware/Software decoding preferences, and QML event propagation (`timelineChanged()` signal).
+- Comprehensive automated verification tests documentation in `README.md` outlining execution steps and test coverage details.
+- Automated unit test `testMidSideDspSeparation()` in `timeline_test.cpp` to verify software fallback Mid-Side DSP stem separation logic with synthetic stereo signals.
+- YouTube Discovery pagination features, implementing `searchMore()` in `YoutubeManager` C++ backend and a paginated "Load More Results" footer button in `MediaBrowser.qml`.
+- Waveform cache persistence using `.pk` files to instantly render visual audio waveforms on startup.
+- Non-linear subtitle/lyric sweeps with customizable syllable Bezier curves, visual editor handles, and Newton-Raphson solvers.
+- Vocal Alignment tool performing sliding amplitude envelope cross-correlations to synchronize clips to guide tracks.
+- Variable playback speed (`playbackRate`) control in C++ `AudioEngine` and interactive tuning toolbar ComboBox in `LyricTunerWindow.qml` with automated loop triggers on syllable highlight.
+- Native QML/C++ borderless Loading Splash Screen Window showing real-time progress and spinning animation, while asynchronously compiling and preparing workspace components on startup.
 
 ### Changed
 - Re-anchored the root window's global `DropArea` and glassmorphic overlay to exclude the timeline editor area. This prevents the global drop area from shadowing/intercepting drop events, allowing files dragged directly onto the timeline tracks to be correctly added as clips and snapped to the drop point.
@@ -68,4 +77,5 @@ All notable changes to this project will be documented in this file.
 - Fixed the song title and artist metadata synchronization bug on intro splash launch in `main.qml`.
 - Fixed vertical panel collapsing of `MediaBrowser` (left pane) and `PropertiesPanel` (right pane) by binding their heights explicitly to `parent.height`.
 - Resolved application freezes during bulk lyric/track replacements by adding `beginResetModel()` and `endResetModel()` blocks to `ClipListModel::handleClipsChanged()`.
+- Fixed QML TypeError when calling `autoGenerateSyllables()` on `Clip` by adding `Q_INVOKABLE` macro declaration in C++ to expose the method to QML.
 

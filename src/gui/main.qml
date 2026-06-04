@@ -42,6 +42,11 @@ ApplicationWindow {
     property int cachedVideoClipsCount: -1
     property real lastPlayheadTime: -1
 
+    // Syllable Loop Playback properties
+    property bool syllableLoopEnabled: false
+    property real syllableLoopStartUs: 0
+    property real syllableLoopEndUs: 0
+
     // Source Monitor properties
     property string sourceMonitorFilePath: ""
     property string sourceMonitorFileName: ""
@@ -575,6 +580,7 @@ ApplicationWindow {
                 }
                 videoPlayer.play();
             } else {
+                rootWindow.syllableLoopEnabled = false;
                 if (rootWindow.shuttleSpeed > 0 && rootWindow.shuttleSpeed <= 1.0) {
                     rootWindow.shuttleSpeed = 0.0;
                 }
@@ -598,6 +604,12 @@ ApplicationWindow {
         target: timelineManager
         
         function onCurrentPlayheadTimeChanged() {
+            if (rootWindow.syllableLoopEnabled && rootWindow.syllableLoopEndUs > rootWindow.syllableLoopStartUs) {
+                if (timelineManager.currentPlayheadTime >= rootWindow.syllableLoopEndUs || timelineManager.currentPlayheadTime < rootWindow.syllableLoopStartUs) {
+                    timelineManager.currentPlayheadTime = rootWindow.syllableLoopStartUs;
+                    return;
+                }
+            }
             rootWindow.updateCachedClips();
             
             if (!audioEngine.isPlaying && timelineManager.currentPlayheadTime === 0) {
@@ -1313,6 +1325,30 @@ ApplicationWindow {
                     }
 
                     Button {
+                        id: btnOpenLyricTuner
+                        text: "🎙️ Lyrics Tuner Window"
+                        implicitHeight: 28
+                        implicitWidth: 160
+                        onClicked: {
+                            lyricTunerWindow.showTunerForActiveSelection();
+                        }
+                        contentItem: Text {
+                            text: btnOpenLyricTuner.text
+                            color: "#FFF"
+                            font.bold: true
+                            font.pixelSize: 13
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            color: btnOpenLyricTuner.hovered ? rootWindow.colorAccentGreen : "#1F352E"
+                            radius: 4
+                            border.color: rootWindow.colorAccentGreen
+                            border.width: 1
+                        }
+                    }
+
+                    Button {
                         id: btnHelp
                         text: "?"
                         implicitWidth: 28
@@ -1724,7 +1760,7 @@ ApplicationWindow {
                                 contentItem: Text {
                                     text: parent.text
                                     color: "#FFF"
-                                    font.pixelSize: parent.width > 60 ? 13 : 11
+                                    font.pixelSize: sourceControlsRow.width > 264 ? 13 : 11
                                     font.bold: true
                                     horizontalAlignment: Text.AlignHCenter
                                     verticalAlignment: Text.AlignVCenter
@@ -1754,7 +1790,7 @@ ApplicationWindow {
                                 contentItem: Text {
                                     text: parent.text
                                     color: "#000"
-                                    font.pixelSize: parent.width > 60 ? 13 : 11
+                                    font.pixelSize: sourceControlsRow.width > 264 ? 13 : 11
                                     font.bold: true
                                     horizontalAlignment: Text.AlignHCenter
                                     verticalAlignment: Text.AlignVCenter
@@ -1779,7 +1815,7 @@ ApplicationWindow {
                                 contentItem: Text {
                                     text: parent.text
                                     color: "#FFF"
-                                    font.pixelSize: parent.width > 60 ? 13 : 11
+                                    font.pixelSize: sourceControlsRow.width > 264 ? 13 : 11
                                     font.bold: true
                                     horizontalAlignment: Text.AlignHCenter
                                     verticalAlignment: Text.AlignVCenter
@@ -1803,7 +1839,7 @@ ApplicationWindow {
                                 contentItem: Text {
                                     text: parent.text
                                     color: "#FFF"
-                                    font.pixelSize: parent.width > 60 ? 13 : 11
+                                    font.pixelSize: sourceControlsRow.width > 264 ? 13 : 11
                                     font.bold: true
                                     horizontalAlignment: Text.AlignHCenter
                                     verticalAlignment: Text.AlignVCenter
@@ -2075,6 +2111,7 @@ ApplicationWindow {
                             id: karaokeLyricView
                             anchors.fill: parent
                             lyricEngine: timelineManager.lyricEngine
+                            showVideoBackground: timelineManager.showVideoBackground
                             fontFamily: timelineManager.subtitleFontFamily
                             fontSize: timelineManager.subtitleFontSize
                             fillColor: timelineManager.subtitleFillColor
@@ -2339,6 +2376,11 @@ ApplicationWindow {
         }
     }
 
+    LyricTunerWindow {
+        id: lyricTunerWindow
+        visible: false
+    }
+
     ExportDialog {
         id: exportDialog
     }
@@ -2387,6 +2429,10 @@ ApplicationWindow {
         anchors.centerIn: parent
         width: 350
         standardButtons: Dialog.NoButton
+
+        Overlay.modal: Rectangle {
+            color: Qt.rgba(0, 0, 0, 0.6)
+        }
 
         background: Rectangle {
             color: rootWindow.colorBgPanel
@@ -2580,6 +2626,10 @@ ApplicationWindow {
         anchors.centerIn: parent
         width: 400
         standardButtons: Dialog.NoButton
+
+        Overlay.modal: Rectangle {
+            color: Qt.rgba(0, 0, 0, 0.6)
+        }
 
         background: Rectangle {
             color: rootWindow.colorBgPanel
@@ -3178,6 +3228,10 @@ ApplicationWindow {
         anchors.centerIn: parent
         width: 420
         standardButtons: Dialog.NoButton
+
+        Overlay.modal: Rectangle {
+            color: Qt.rgba(0, 0, 0, 0.6)
+        }
         
         property string errorMsg: ""
 

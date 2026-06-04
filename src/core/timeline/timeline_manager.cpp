@@ -17,6 +17,20 @@
 #include <QProcess>
 #include <cmath>
 #include <algorithm>
+#include <iostream>
+
+#if defined(NCKTV_HAS_ONNX) && NCKTV_HAS_ONNX
+#include <onnxruntime_cxx_api.h>
+#endif
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <sysinfoapi.h>
+#include <dxgi.h>
+#endif
 
 namespace ncktv {
 
@@ -50,6 +64,7 @@ TimelineManager::TimelineManager(QObject* parent)
         m_modelsDirPath = QDir(appLocal).filePath("models");
     }
 
+    detectSystemInfo();
     scanModelsDir();
 
     // Construct the LyricEngine for centralized lyric synchronization
@@ -105,26 +120,88 @@ void TimelineManager::scanModelsDir() {
     m_discoveredModels.clear();
     m_discoveredModelPaths.clear();
 
-    if (m_modelsDirPath.isEmpty()) {
-        emit discoveredModelsChanged();
-        return;
+#ifdef _WIN32
+    // Automatically search and register CUDA/cuDNN DLL path to DLL search directories
+    QStringList dllPathsToTry;
+    dllPathsToTry.append(QDir::current().filePath("models/cudn12/bin"));
+    dllPathsToTry.append(QDir(QCoreApplication::applicationDirPath()).filePath("models/cudn12/bin"));
+    dllPathsToTry.append(QDir(QCoreApplication::applicationDirPath() + "/../models/cudn12/bin").cleanPath(QCoreApplication::applicationDirPath() + "/../models/cudn12/bin"));
+    dllPathsToTry.append(QDir(QCoreApplication::applicationDirPath() + "/../../models/cudn12/bin").cleanPath(QCoreApplication::applicationDirPath() + "/../../models/cudn12/bin"));
+    dllPathsToTry.append(QDir(QCoreApplication::applicationDirPath() + "/../../../models/cudn12/bin").cleanPath(QCoreApplication::applicationDirPath() + "/../../../models/cudn12/bin"));
+    dllPathsToTry.append(QDir(QCoreApplication::applicationDirPath() + "/../../../../models/cudn12/bin").cleanPath(QCoreApplication::applicationDirPath() + "/../../../../models/cudn12/bin"));
+    dllPathsToTry.append(QDir(QDir::currentPath() + "/../models/cudn12/bin").cleanPath(QDir::currentPath() + "/../models/cudn12/bin"));
+    dllPathsToTry.append(QDir(QDir::currentPath() + "/../../models/cudn12/bin").cleanPath(QDir::currentPath() + "/../../models/cudn12/bin"));
+    dllPathsToTry.append(QDir(QDir::currentPath() + "/../../../models/cudn12/bin").cleanPath(QDir::currentPath() + "/../../../models/cudn12/bin"));
+    dllPathsToTry.append(QDir(QDir::currentPath() + "/../../../../models/cudn12/bin").cleanPath(QDir::currentPath() + "/../../../../models/cudn12/bin"));
+
+    for (const QString& dllPath : dllPathsToTry) {
+        if (QDir(dllPath).exists()) {
+            QString nativeDllPath = QDir::toNativeSeparators(dllPath);
+            std::wstring wDllPath = nativeDllPath.toStdWString();
+            if (SetDllDirectoryW(wDllPath.c_str())) {
+                std::cout << "[StemSeparator] Registered DLL Search Directory: " << nativeDllPath.toStdString() << "\n";
+                // Prepend to PATH for dynamic ONNX dependencies loading
+                QByteArray currentPathEnv = qgetenv("PATH");
+                QByteArray newPathEnv = nativeDllPath.toLocal8Bit() + ";" + currentPathEnv;
+                qputenv("PATH", newPathEnv);
+                break;
+            }
+        }
+    }
+#endif
+
+    // Collect candidate paths for project models
+    QStringList modelPathsToScan;
+    modelPathsToScan.append(QDir::current().filePath("models"));
+    modelPathsToScan.append(QDir(QCoreApplication::applicationDirPath()).filePath("models"));
+    modelPathsToScan.append(QDir(QCoreApplication::applicationDirPath() + "/../models").cleanPath(QCoreApplication::applicationDirPath() + "/../models"));
+    modelPathsToScan.append(QDir(QCoreApplication::applicationDirPath() + "/../../models").cleanPath(QCoreApplication::applicationDirPath() + "/../../models"));
+    modelPathsToScan.append(QDir(QCoreApplication::applicationDirPath() + "/../../../models").cleanPath(QCoreApplication::applicationDirPath() + "/../../../models"));
+    modelPathsToScan.append(QDir(QCoreApplication::applicationDirPath() + "/../../../../models").cleanPath(QCoreApplication::applicationDirPath() + "/../../../../models"));
+    modelPathsToScan.append(QDir(QDir::currentPath() + "/../models").cleanPath(QDir::currentPath() + "/../models"));
+    modelPathsToScan.append(QDir(QDir::currentPath() + "/../../models").cleanPath(QDir::currentPath() + "/../../models"));
+    modelPathsToScan.append(QDir(QDir::currentPath() + "/../../../models").cleanPath(QDir::currentPath() + "/../../../models"));
+    modelPathsToScan.append(QDir(QDir::currentPath() + "/../../../../models").cleanPath(QDir::currentPath() + "/../../../../models"));
+
+    for (const QString& projectModelsPath : modelPathsToScan) {
+        if (QDir(projectModelsPath).exists()) {
+            QDir mDir(projectModelsPath);
+            QDirIterator it(projectModelsPath, QStringList() << "*.onnx", QDir::Files, QDirIterator::Subdirectories);
+            while (it.hasNext()) {
+                QString fullPath = it.next();
+                if (!m_discoveredModelPaths.contains(fullPath)) {
+                    m_discoveredModelPaths.append(fullPath);
+                    m_discoveredModels.append(mDir.relativeFilePath(fullPath));
+                }
+            }
+        }
     }
 
-    QDir dir(m_modelsDirPath);
-    if (!dir.exists()) {
-        emit discoveredModelsChanged();
-        return;
-    }
+    // Collect candidate paths for Ultimate Vocal Remover models
+    QStringList uvrPathsToScan;
+    uvrPathsToScan.append(QDir::current().filePath("Ultimate Vocal Remover/models"));
+    uvrPathsToScan.append(QDir(QCoreApplication::applicationDirPath()).filePath("Ultimate Vocal Remover/models"));
+    uvrPathsToScan.append(QDir(QCoreApplication::applicationDirPath() + "/../Ultimate Vocal Remover/models").cleanPath(QCoreApplication::applicationDirPath() + "/../Ultimate Vocal Remover/models"));
+    uvrPathsToScan.append(QDir(QCoreApplication::applicationDirPath() + "/../../Ultimate Vocal Remover/models").cleanPath(QCoreApplication::applicationDirPath() + "/../../Ultimate Vocal Remover/models"));
+    uvrPathsToScan.append(QDir(QCoreApplication::applicationDirPath() + "/../../../Ultimate Vocal Remover/models").cleanPath(QCoreApplication::applicationDirPath() + "/../../../Ultimate Vocal Remover/models"));
+    uvrPathsToScan.append(QDir(QCoreApplication::applicationDirPath() + "/../../../../Ultimate Vocal Remover/models").cleanPath(QCoreApplication::applicationDirPath() + "/../../../../Ultimate Vocal Remover/models"));
+    uvrPathsToScan.append(QDir(QDir::currentPath() + "/../Ultimate Vocal Remover/models").cleanPath(QDir::currentPath() + "/../Ultimate Vocal Remover/models"));
+    uvrPathsToScan.append(QDir(QDir::currentPath() + "/../../Ultimate Vocal Remover/models").cleanPath(QDir::currentPath() + "/../../Ultimate Vocal Remover/models"));
+    uvrPathsToScan.append(QDir(QDir::currentPath() + "/../../../Ultimate Vocal Remover/models").cleanPath(QDir::currentPath() + "/../../../Ultimate Vocal Remover/models"));
+    uvrPathsToScan.append(QDir(QDir::currentPath() + "/../../../../Ultimate Vocal Remover/models").cleanPath(QDir::currentPath() + "/../../../../Ultimate Vocal Remover/models"));
 
-    // Support recursive scanning to find models in subfolders (e.g. models/Demucs_Models, models/MDX_Net_Models)
-    QDirIterator it(m_modelsDirPath, QStringList() << "*.onnx", QDir::Files, QDirIterator::Subdirectories);
-    while (it.hasNext()) {
-        QString fullPath = it.next();
-        m_discoveredModelPaths.append(fullPath);
-        
-        // Relpath or just filename for friendly name
-        QString relPath = dir.relativeFilePath(fullPath);
-        m_discoveredModels.append(relPath);
+    for (const QString& projectUvrPath : uvrPathsToScan) {
+        if (QDir(projectUvrPath).exists()) {
+            QDir uvrDir(projectUvrPath);
+            QDirIterator it(projectUvrPath, QStringList() << "*.onnx", QDir::Files, QDirIterator::Subdirectories);
+            while (it.hasNext()) {
+                QString fullPath = it.next();
+                if (!m_discoveredModelPaths.contains(fullPath)) {
+                    m_discoveredModelPaths.append(fullPath);
+                    m_discoveredModels.append("UVR: " + uvrDir.relativeFilePath(fullPath));
+                }
+            }
+        }
     }
 
     emit discoveredModelsChanged();
@@ -1641,6 +1718,171 @@ void TimelineManager::romanizeClip(QObject* clipObj) {
     }
 }
 
+double TimelineManager::alignAudioClip(const QString& targetClipId, const QString& referenceClipId) {
+    Clip* targetClip = nullptr;
+    Track* targetTrack = nullptr;
+    for (Track* t : m_trackListModel->tracks()) {
+        if (Clip* c = t->getClip(targetClipId)) {
+            targetClip = c;
+            targetTrack = t;
+            break;
+        }
+    }
+    if (!targetClip || targetClip->type() != Clip::Audio) return 0.0;
+
+    Clip* refClip = nullptr;
+    if (!referenceClipId.isEmpty()) {
+        for (Track* t : m_trackListModel->tracks()) {
+            if (Clip* c = t->getClip(referenceClipId)) {
+                refClip = c;
+                break;
+            }
+        }
+    } else {
+        // Find a fallback audio clip in another track
+        for (Track* t : m_trackListModel->tracks()) {
+            if (t == targetTrack) continue;
+            for (Clip* c : t->clips()) {
+                if (c->type() == Clip::Audio) {
+                    refClip = c;
+                    break;
+                }
+            }
+            if (refClip) break;
+        }
+    }
+    if (!refClip || refClip->type() != Clip::Audio) return 0.0;
+
+    std::vector<float> targetSamples;
+    int targetSampleRate = 48000;
+    if (AudioEngine::instance()) {
+        AudioReader* r = AudioEngine::instance()->getReader(targetClip->sourceFile());
+        if (r) {
+            targetSamples = r->samples();
+            targetSampleRate = r->sampleRate();
+        }
+    }
+    if (targetSamples.empty()) {
+        AudioReader r;
+        if (r.decodeFile(targetClip->sourceFile())) {
+            targetSamples = r.samples();
+            targetSampleRate = r.sampleRate();
+        }
+    }
+
+    std::vector<float> refSamples;
+    int refSampleRate = 48000;
+    if (AudioEngine::instance()) {
+        AudioReader* r = AudioEngine::instance()->getReader(refClip->sourceFile());
+        if (r) {
+            refSamples = r->samples();
+            refSampleRate = r->sampleRate();
+        }
+    }
+    if (refSamples.empty()) {
+        AudioReader r;
+        if (r.decodeFile(refClip->sourceFile())) {
+            refSamples = r.samples();
+            refSampleRate = r.sampleRate();
+        }
+    }
+
+    if (targetSamples.empty() || refSamples.empty()) {
+        return 0.0;
+    }
+
+    auto extractClipActiveEnvelope = [](const std::vector<float>& samples, int sampleRate, qint64 sourceStartUs, qint64 durationUs) -> std::vector<float> {
+        double startSec = static_cast<double>(sourceStartUs) / 1000000.0;
+        double durSec = static_cast<double>(durationUs) / 1000000.0;
+        size_t startFrame = static_cast<size_t>(startSec * sampleRate);
+        size_t durFrames = static_cast<size_t>(durSec * sampleRate);
+        
+        int channels = 2;
+        size_t startSample = startFrame * channels;
+        size_t durSamples = durFrames * channels;
+        
+        if (startSample >= samples.size()) {
+            return std::vector<float>();
+        }
+        size_t endSample = (std::min)(startSample + durSamples, samples.size());
+        
+        int windowFrames = static_cast<int>(0.02 * sampleRate); // 20ms
+        int step = windowFrames * channels;
+        std::vector<float> env;
+        env.reserve((endSample - startSample) / step + 1);
+        
+        for (size_t i = startSample; i < endSample; i += step) {
+            float sum = 0.0f;
+            size_t count = 0;
+            size_t chunkEnd = (std::min)(i + step, endSample);
+            for (size_t j = i; j < chunkEnd; ++j) {
+                sum += std::abs(samples[j]);
+                count++;
+            }
+            if (count > 0) {
+                env.push_back(sum / count);
+            } else {
+                env.push_back(0.0f);
+            }
+        }
+        return env;
+    };
+
+    std::vector<float> targetEnv = extractClipActiveEnvelope(targetSamples, targetSampleRate, targetClip->sourceStart(), targetClip->duration());
+    std::vector<float> refEnv = extractClipActiveEnvelope(refSamples, refSampleRate, refClip->sourceStart(), refClip->duration());
+
+    if (targetEnv.empty() || refEnv.empty()) {
+        return 0.0;
+    }
+
+    qint64 targetStartUs = targetClip->startTime();
+    qint64 refStartUs = refClip->startTime();
+    qint64 initOffsetUs = targetStartUs - refStartUs;
+    int initLagSteps = static_cast<int>(std::round(static_cast<double>(initOffsetUs) / 20000.0));
+
+    double maxCorr = -1.0;
+    int bestLagSteps = 0;
+    bool foundPeak = false;
+
+    // Search lag from -5s to +5s (in 20ms steps, so -250 to +250)
+    int maxSearchSteps = 250; 
+    for (int L = -maxSearchSteps; L <= maxSearchSteps; ++L) {
+        int k = initLagSteps + L;
+        double sum = 0.0;
+        int count = 0;
+        
+        for (size_t i = 0; i < targetEnv.size(); ++i) {
+            int refIdx = static_cast<int>(i) + k;
+            if (refIdx >= 0 && refIdx < static_cast<int>(refEnv.size())) {
+                sum += targetEnv[i] * refEnv[refIdx];
+                count++;
+            }
+        }
+        
+        if (count > 10) {
+            if (sum > maxCorr) {
+                maxCorr = sum;
+                bestLagSteps = L;
+                foundPeak = true;
+            }
+        }
+    }
+
+    double offsetSeconds = 0.0;
+    if (foundPeak) {
+        qint64 offsetUs = static_cast<qint64>(bestLagSteps) * 20000LL;
+        qint64 newStartTime = targetClip->startTime() + offsetUs;
+        if (newStartTime < 0) {
+            newStartTime = 0;
+            offsetUs = -targetClip->startTime();
+        }
+        targetClip->setStartTime(newStartTime);
+        offsetSeconds = static_cast<double>(offsetUs) / 1000000.0;
+        emit timelineChanged();
+    }
+    return offsetSeconds;
+}
+
 bool TimelineManager::disableHwDecoding() const {
     QSettings settings("NC-KTV", "NC-KTV_V2");
     return settings.value("disable_hw_decoding", false).toBool();
@@ -1732,6 +1974,82 @@ void TimelineManager::guessMetadataFromFilename(const QString& filePath) {
         guessedTitle = capitalize(guessedTitle);
         setSongTitle(guessedTitle);
     }
+}
+
+void TimelineManager::detectSystemInfo() {
+    // 1. OS Info
+    m_osInfo = QSysInfo::prettyProductName() + " (" + QSysInfo::kernelVersion() + ")";
+
+    // 2. CPU Info
+#ifdef _WIN32
+    QSettings cpuRegistry("HKEY_LOCAL_MACHINE\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", QSettings::NativeFormat);
+    m_cpuInfo = cpuRegistry.value("ProcessorNameString").toString().trimmed();
+    if (m_cpuInfo.isEmpty()) {
+        m_cpuInfo = QSysInfo::buildCpuArchitecture();
+    }
+#else
+    m_cpuInfo = QSysInfo::buildCpuArchitecture();
+#endif
+
+    // 3. RAM Info
+#ifdef _WIN32
+    MEMORYSTATUSEX statex;
+    statex.dwLength = sizeof(statex);
+    if (GlobalMemoryStatusEx(&statex)) {
+        double totalGB = static_cast<double>(statex.ullTotalPhys) / (1024.0 * 1024.0 * 1024.0);
+        double freeGB = static_cast<double>(statex.ullAvailPhys) / (1024.0 * 1024.0 * 1024.0);
+        m_ramInfo = QString("%1 GB Total (%2 GB Available)").arg(totalGB, 0, 'f', 1).arg(freeGB, 0, 'f', 1);
+    } else {
+        m_ramInfo = "Unknown RAM";
+    }
+#else
+    m_ramInfo = "RAM Query Not Supported";
+#endif
+
+    // 4. GPU Info
+#ifdef _WIN32
+    QStringList gpus;
+    IDXGIFactory* pFactory = nullptr;
+    if (SUCCEEDED(CreateDXGIFactory(__uuidof(IDXGIFactory), (void**)&pFactory))) {
+        IDXGIAdapter* pAdapter = nullptr;
+        for (UINT i = 0; pFactory->EnumAdapters(i, &pAdapter) != DXGI_ERROR_NOT_FOUND; ++i) {
+            DXGI_ADAPTER_DESC desc;
+            if (SUCCEEDED(pAdapter->GetDesc(&desc))) {
+                QString gpuName = QString::fromWCharArray(desc.Description);
+                if (!gpuName.contains("Microsoft Basic Render Driver")) {
+                    gpus.append(gpuName);
+                }
+            }
+            pAdapter->Release();
+        }
+        pFactory->Release();
+    }
+    if (!gpus.isEmpty()) {
+        m_gpuInfo = gpus.join(", ");
+    } else {
+        m_gpuInfo = "No Dedicated GPU Detected (Standard Basic Driver only)";
+    }
+#else
+    m_gpuInfo = "GPU Query Not Supported";
+#endif
+
+    // 5. ONNX Provider Info
+#if defined(NCKTV_HAS_ONNX) && NCKTV_HAS_ONNX
+    try {
+        std::vector<std::string> providers = Ort::GetAvailableProviders();
+        QStringList list;
+        for (const auto& p : providers) {
+            QString name = QString::fromStdString(p);
+            name.replace("ExecutionProvider", "");
+            list.append(name);
+        }
+        m_onnxProviderInfo = list.join(", ");
+    } catch (...) {
+        m_onnxProviderInfo = "None";
+    }
+#else
+    m_onnxProviderInfo = "Not Compiled";
+#endif
 }
 
 } // namespace ncktv

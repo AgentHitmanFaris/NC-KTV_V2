@@ -391,8 +391,10 @@ Rectangle {
 
             // Wrap inside clip area
             Item {
-                implicitWidth: Math.max(timelineScroll.width, 180 + timeToX(timelineManager.totalDuration) + 300)
+                implicitWidth: 180 + timeToX(timelineManager.totalDuration) + 300
                 implicitHeight: tracksColumn.implicitHeight + timeRuler.height + 50
+                width: Math.max(timelineScroll.width, implicitWidth)
+                height: Math.max(timelineScroll.height, implicitHeight)
 
                 // Ruler Click / Scrub Canvas Area
                 Rectangle {
@@ -599,7 +601,10 @@ Rectangle {
 
                 DropArea {
                     id: timelineDropArea
-                    anchors.fill: tracksColumn
+                    anchors.top: tracksColumn.top
+                    anchors.bottom: parent.bottom
+                    anchors.left: parent.left
+                    anchors.right: parent.right
                     keys: ["text/uri-list"]
                     
                     onEntered: (drag) => {
@@ -691,7 +696,7 @@ Rectangle {
                 }
                 
                 Rectangle {
-                    anchors.fill: tracksColumn
+                    anchors.fill: timelineDropArea
                     color: "transparent"
                     border.color: rootWindow.colorAccentViolet
                     border.width: 2

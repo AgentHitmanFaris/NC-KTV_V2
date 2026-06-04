@@ -31,6 +31,7 @@ public:
     [[nodiscard]] Track* track() const { return m_track; }
     void setTrack(Track* track);
     Q_INVOKABLE void refresh();
+    Q_INVOKABLE ncktv::Clip* getClip(int row) const;
 
     // QAbstractItemModel interface
     [[nodiscard]] int rowCount(const QModelIndex& parent = QModelIndex()) const override;

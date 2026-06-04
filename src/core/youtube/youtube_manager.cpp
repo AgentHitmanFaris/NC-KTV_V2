@@ -24,43 +24,78 @@ YoutubeManager::~YoutubeManager() {
 }
 
 bool YoutubeManager::findYtDlpCommand(QString& cmd, QStringList& fallbackArgs) const {
+    if (m_hasCachedCmd) {
+        cmd = m_cachedCmd;
+        fallbackArgs = m_cachedFallbackArgs;
+        return !m_cachedCmd.isEmpty();
+    }
+
     // 1. Try "yt-dlp" in system PATH
-    QProcess proc;
-    proc.setProgram("yt-dlp");
-    proc.setArguments({"--version"});
-    proc.start();
-    if (proc.waitForStarted(1000)) {
-        proc.waitForFinished(1000);
-        if (proc.exitCode() == 0) {
-            cmd = "yt-dlp";
-            fallbackArgs.clear();
-            return true;
+    {
+        QProcess proc;
+        proc.setProgram("yt-dlp");
+        proc.setArguments({"--version"});
+        proc.start();
+        if (proc.waitForStarted(1000)) {
+            if (proc.waitForFinished(2000)) {
+                if (proc.exitCode() == 0) {
+                    m_cachedCmd = "yt-dlp";
+                    m_cachedFallbackArgs.clear();
+                    m_hasCachedCmd = true;
+                    cmd = m_cachedCmd;
+                    fallbackArgs = m_cachedFallbackArgs;
+                    return true;
+                }
+            } else {
+                proc.kill();
+                proc.waitForFinished(500);
+            }
         }
     }
 
     // 2. Try "python -m yt_dlp"
-    proc.setProgram("python");
-    proc.setArguments({"-m", "yt_dlp", "--version"});
-    proc.start();
-    if (proc.waitForStarted(1000)) {
-        proc.waitForFinished(2000);
-        if (proc.exitCode() == 0) {
-            cmd = "python";
-            fallbackArgs = {"-m", "yt_dlp"};
-            return true;
+    {
+        QProcess proc;
+        proc.setProgram("python");
+        proc.setArguments({"-m", "yt_dlp", "--version"});
+        proc.start();
+        if (proc.waitForStarted(1000)) {
+            if (proc.waitForFinished(2000)) {
+                if (proc.exitCode() == 0) {
+                    m_cachedCmd = "python";
+                    m_cachedFallbackArgs = {"-m", "yt_dlp"};
+                    m_hasCachedCmd = true;
+                    cmd = m_cachedCmd;
+                    fallbackArgs = m_cachedFallbackArgs;
+                    return true;
+                }
+            } else {
+                proc.kill();
+                proc.waitForFinished(500);
+            }
         }
     }
 
     // 2.5. Try user's specific embedded python interpreter path
-    proc.setProgram("D:\\Program Files\\pythonembededglobal\\python.exe");
-    proc.setArguments({"-m", "yt_dlp", "--version"});
-    proc.start();
-    if (proc.waitForStarted(1000)) {
-        proc.waitForFinished(2000);
-        if (proc.exitCode() == 0) {
-            cmd = "D:\\Program Files\\pythonembededglobal\\python.exe";
-            fallbackArgs = {"-m", "yt_dlp"};
-            return true;
+    {
+        QProcess proc;
+        proc.setProgram("D:\\Program Files\\pythonembededglobal\\python.exe");
+        proc.setArguments({"-m", "yt_dlp", "--version"});
+        proc.start();
+        if (proc.waitForStarted(1000)) {
+            if (proc.waitForFinished(2000)) {
+                if (proc.exitCode() == 0) {
+                    m_cachedCmd = "D:\\Program Files\\pythonembededglobal\\python.exe";
+                    m_cachedFallbackArgs = {"-m", "yt_dlp"};
+                    m_hasCachedCmd = true;
+                    cmd = m_cachedCmd;
+                    fallbackArgs = m_cachedFallbackArgs;
+                    return true;
+                }
+            } else {
+                proc.kill();
+                proc.waitForFinished(500);
+            }
         }
     }
 
@@ -75,12 +110,19 @@ bool YoutubeManager::findYtDlpCommand(QString& cmd, QStringList& fallbackArgs) c
 
     for (const QString& path : commonPaths) {
         if (QFile::exists(path)) {
-            cmd = path;
-            fallbackArgs.clear();
+            m_cachedCmd = path;
+            m_cachedFallbackArgs.clear();
+            m_hasCachedCmd = true;
+            cmd = m_cachedCmd;
+            fallbackArgs = m_cachedFallbackArgs;
             return true;
         }
     }
 
+    // Cache the failure too, so we don't keep blocking the UI thread with failed checks
+    m_cachedCmd = "";
+    m_cachedFallbackArgs.clear();
+    m_hasCachedCmd = true;
     return false;
 }
 
@@ -95,6 +137,36 @@ void YoutubeManager::search(const QString& query) {
         return;
     }
 
+    m_lastQuery = query;
+    m_currentPage = 1;
+    
+    if (m_hasMoreResults) {
+        m_hasMoreResults = false;
+        emit hasMoreResultsChanged();
+    }
+
+    runSearch(query, 1);
+}
+
+void YoutubeManager::searchMore() {
+    if (m_isSearching) {
+        emit searchFailed("A search is already in progress.");
+        return;
+    }
+
+    if (m_lastQuery.trimmed().isEmpty()) {
+        emit searchFailed("No active search query.");
+        return;
+    }
+
+    if (!m_hasMoreResults) {
+        return;
+    }
+
+    runSearch(m_lastQuery, m_currentPage + 1);
+}
+
+void YoutubeManager::runSearch(const QString& query, int page) {
     QString cmd;
     QStringList args;
     if (!findYtDlpCommand(cmd, args)) {
@@ -109,10 +181,15 @@ void YoutubeManager::search(const QString& query) {
     m_searchOutputBuffer.clear();
     emit isSearchingChanged();
 
-    // Setup search arguments
-    // Limit to 5 results for high speed flat-playlist lookup
+    m_currentPage = page;
+
+    int playlistStart = (page - 1) * 10 + 1;
+    int playlistEnd = page * 10;
+    QString searchExpr = QString("ytsearch%1:%2").arg(playlistEnd).arg(query);
     args.append({
-        "ytsearch5:" + query,
+        searchExpr,
+        "--playlist-start", QString::number(playlistStart),
+        "--playlist-end", QString::number(playlistEnd),
         "--dump-json",
         "--flat-playlist",
         "--no-playlist"
@@ -125,7 +202,7 @@ void YoutubeManager::search(const QString& query) {
     connect(m_searchProcess, &QProcess::readyReadStandardOutput, this, &YoutubeManager::onSearchReadyRead);
     connect(m_searchProcess, &QProcess::finished, this, &YoutubeManager::onSearchFinished);
 
-    std::cout << "[YT SEARCH] Spawning process: " << cmd.toStdString() << " " << args.join(" ").toStdString() << "\n";
+    std::cout << "[YT SEARCH] Spawning process (Page " << page << "): " << cmd.toStdString() << " " << args.join(" ").toStdString() << "\n";
     m_searchProcess->start();
 }
 
@@ -143,6 +220,12 @@ void YoutubeManager::onSearchFinished(int exitCode, QProcess::ExitStatus exitSta
     if (exitCode != 0) {
         QString stderrOutput = m_searchProcess ? QString::fromUtf8(m_searchProcess->readAllStandardError()).trimmed() : "";
         m_lastError = "Search process failed. Check network connection.\n" + stderrOutput;
+        
+        // If pagination failed, restore previous page state
+        if (m_currentPage > 1) {
+            m_currentPage--;
+        }
+        
         emit errorOccurred(m_lastError);
         emit searchFailed(m_lastError);
         if (m_searchProcess) {
@@ -183,8 +266,20 @@ void YoutubeManager::onSearchFinished(int exitCode, QProcess::ExitStatus exitSta
         }
     }
 
-    std::cout << "[YT SEARCH] Completed. Found " << results.size() << " tracks.\n";
-    emit searchCompleted(results);
+    std::cout << "[YT SEARCH] Completed Page " << m_currentPage << ". Found " << results.size() << " tracks.\n";
+    
+    bool oldHasMore = m_hasMoreResults;
+    // If we returned less than 10 results, we've hit the end of the search results
+    m_hasMoreResults = (results.size() >= 10);
+    if (m_hasMoreResults != oldHasMore) {
+        emit hasMoreResultsChanged();
+    }
+
+    if (m_currentPage == 1) {
+        emit searchCompleted(results);
+    } else {
+        emit moreResultsLoaded(results);
+    }
 
     if (m_searchProcess) {
         m_searchProcess->deleteLater();
@@ -192,7 +287,7 @@ void YoutubeManager::onSearchFinished(int exitCode, QProcess::ExitStatus exitSta
     }
 }
 
-void YoutubeManager::download(const QString& videoId, bool audioOnly, const QString& saveDir) {
+void YoutubeManager::download(const QString& videoId, bool audioOnly, const QString& saveDir, const QString& title) {
     if (videoId.isEmpty()) return;
 
     if (m_downloadProcesses.contains(videoId)) {
@@ -214,20 +309,28 @@ void YoutubeManager::download(const QString& videoId, bool audioOnly, const QStr
         dir.mkpath(".");
     }
 
+    QString safeTitle = title.trimmed();
+    if (safeTitle.isEmpty()) {
+        safeTitle = videoId;
+    } else {
+        // Sanitize title for filename: replace \ / : * ? " < > | with _
+        safeTitle.replace(QRegularExpression(R"([\\/:*?"<>|])"), "_");
+    }
+
     QString finalOutFile;
     if (audioOnly) {
-        finalOutFile = dir.absoluteFilePath(videoId + ".wav");
+        finalOutFile = dir.absoluteFilePath(safeTitle + ".wav");
         args.append({
             "-x",
             "--audio-format", "wav",
             "--audio-quality", "0",
-            "-o", dir.absoluteFilePath(videoId + ".%(ext)s")
+            "-o", dir.absoluteFilePath(safeTitle + ".%(ext)s")
         });
     } else {
-        finalOutFile = dir.absoluteFilePath(videoId + ".mp4");
+        finalOutFile = dir.absoluteFilePath(safeTitle + ".mp4");
         args.append({
             "-f", "bestvideo[vcodec^=avc1][height<=1080]+bestaudio[acodec^=mp4a]/best[vcodec^=avc1][height<=1080]/best[ext=mp4]/best",
-            "-o", dir.absoluteFilePath(videoId + ".%(ext)s")
+            "-o", dir.absoluteFilePath(safeTitle + ".%(ext)s")
         });
     }
 
@@ -316,11 +419,11 @@ void YoutubeManager::onDownloadFinished(const QString& videoId, int exitCode, QP
         std::cout << "[YT DOWNLOAD] Completed: " << outPath.toStdString() << "\n";
     } else {
         // If yt-dlp wrote to a slightly different name (e.g. extension resolved to .mkv instead of .mp4),
-        // let's do a wild-card search in that directory to find any file matching videoId
+        // let's do a wild-card search in that directory to find any file matching the target base name
         QFileInfo fi(outPath);
         QDir dir = fi.dir();
         QStringList filters;
-        filters << videoId + ".*";
+        filters << fi.baseName() + ".*";
         QStringList matches = dir.entryList(filters, QDir::Files);
         if (!matches.isEmpty()) {
             QString actualPath = dir.absoluteFilePath(matches.first());

@@ -24,6 +24,15 @@ public:
     [[nodiscard]] const std::vector<Peak>& peaks256() const { return m_peaks256; }
     [[nodiscard]] const std::vector<Peak>& peaks4096() const { return m_peaks4096; }
 
+    void setSamples(const std::vector<float>& samples) {
+        m_samples = samples;
+        m_durationSeconds = static_cast<double>(m_samples.size() / 2.0) / m_sampleRate;
+    }
+
+    bool loadPeakCache(const QString& filePath);
+    bool savePeakCache(const QString& filePath);
+    QString getCachePath(const QString& filePath) const;
+
     [[nodiscard]] int sampleRate() const { return m_sampleRate; }
     [[nodiscard]] int channels() const { return m_channels; }
     [[nodiscard]] double durationSeconds() const { return m_durationSeconds; }

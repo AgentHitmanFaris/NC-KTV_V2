@@ -13,6 +13,7 @@ Item {
 
     // ── Required Properties ──────────────────────────────────────────────────
     property var lyricEngine: null
+    property bool showVideoBackground: false
 
     // Font styling (bound from timelineManager subtitle properties)
     property string fontFamily: "Georgia"
@@ -48,6 +49,9 @@ Item {
         
         // Solid black background for WordBounce, dark gradient for Cinema, transparent for overlays
         backgroundColor: {
+            if (root.showVideoBackground) {
+                return "#00000000";
+            }
             var mode = root.lyricEngine ? root.lyricEngine.displayMode : 0;
             if (mode === 2) {
                 return "#000000"; // WordBounce: Solid Black

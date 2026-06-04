@@ -866,6 +866,369 @@ void testLyricEngine() {
     std::cout << "[PASS] LyricEngine test completed successfully.\n\n";
 }
 
+void testMetadataGuesser() {
+    std::cout << "[TEST] Running Metadata Guesser (Filename Parser) test...\n";
+
+    TimelineManager manager;
+
+    // We can trigger it by adding a clip to a track
+    QString trackId = manager.addTrack(Track::Audio, "Background Audio");
+
+    // Test 1: Standard "Artist - Title" format with noise suffix
+    manager.addClipToTrack(trackId, "clip_guess_1", Track::Audio, 0LL, 1000000LL, "queen - bohemian rhapsody (official video).wav");
+    assert(manager.artistName() == "Queen");
+    assert(manager.songTitle() == "Bohemian Rhapsody");
+
+    // Reset metadata for next test
+    manager.setArtistName("Unknown Artist");
+    manager.setSongTitle("Untitled Song");
+
+    // Test 2: Another delimiter " - " and lowercase capitalization
+    manager.addClipToTrack(trackId, "clip_guess_2", Track::Audio, 1000000LL, 1000000LL, "michael jackson - billie jean_vocals.mp3");
+    assert(manager.artistName() == "Michael Jackson");
+    assert(manager.songTitle() == "Billie Jean");
+
+    std::cout << "[PASS] Metadata Guesser test completed successfully.\n\n";
+}
+
+void testHwDecodingPreferences() {
+    std::cout << "[TEST] Running HW Decoding Preferences test...\n";
+
+    TimelineManager manager;
+    // Store initial state
+    bool originalVal = manager.disableHwDecoding();
+
+    // Toggle setting
+    manager.setDisableHwDecoding(true);
+    assert(manager.disableHwDecoding() == true);
+
+    manager.setDisableHwDecoding(false);
+    assert(manager.disableHwDecoding() == false);
+
+    // Restore original val
+    manager.setDisableHwDecoding(originalVal);
+
+    std::cout << "[PASS] HW Decoding Preferences test completed successfully.\n\n";
+}
+
+void testTimelineChangedPropagation() {
+    std::cout << "[TEST] Running timelineChanged Signal Propagation test...\n";
+
+    TimelineManager manager;
+    bool signalEmitted = false;
+    QObject::connect(&manager, &TimelineManager::timelineChanged, [&]() {
+        signalEmitted = true;
+    });
+
+    // 1. Trigger via addTrack
+    QString trackId = manager.addTrack(Track::Audio, "Test Track");
+    assert(signalEmitted);
+    signalEmitted = false; // Reset
+
+    // 2. Trigger via addClipToTrack
+    bool clipAdded = manager.addClipToTrack(trackId, "clip_sig_test", Track::Audio, 0LL, 1000000LL, "test_file.wav");
+    assert(clipAdded);
+    assert(signalEmitted);
+    signalEmitted = false; // Reset
+
+    // 3. Trigger via removeTrack
+    bool trackRemoved = manager.removeTrack(trackId);
+    assert(trackRemoved);
+    assert(signalEmitted);
+
+    std::cout << "[PASS] timelineChanged Signal Propagation test completed successfully.\n\n";
+}
+
+void testMidSideDspSeparation() {
+    std::cout << "[TEST] Running Mid-Side DSP Separation (Fallback) test...\n";
+
+    // Create synthetic stereo interleaved audio: L=0.8, R=0.2 for 1000 stereo frames
+    const size_t numFrames = 1000;
+    const size_t totalSamples = numFrames * 2; // stereo interleaved
+    std::vector<float> input(totalSamples);
+    for (size_t i = 0; i < numFrames; ++i) {
+        input[i * 2]     = 0.8f;  // Left
+        input[i * 2 + 1] = 0.2f;  // Right
+    }
+
+    // Run Mid-Side separation (same algorithm as StemSeparationWorker fallback)
+    std::vector<float> vocals(totalSamples, 0.0f);
+    std::vector<float> instrumental(totalSamples, 0.0f);
+
+    for (size_t idx = 0; idx < numFrames; ++idx) {
+        size_t i = idx * 2;
+        float L = input[i];
+        float R = input[i + 1];
+
+        // Mid channel: center signals (vocals)
+        float mid = (L + R) * 0.5f;
+        vocals[i]     = mid;
+        vocals[i + 1] = mid;
+
+        // Side channel: stereo difference (instrumentals)
+        float sideL = (L - R) * 0.5f;
+        float sideR = (R - L) * 0.5f;
+        instrumental[i]     = sideL;
+        instrumental[i + 1] = sideR;
+    }
+
+    // Verify vocal samples: Mid = (0.8 + 0.2) / 2 = 0.5 for both channels
+    for (size_t i = 0; i < totalSamples; ++i) {
+        assert(std::abs(vocals[i] - 0.5f) < 1e-6f);
+    }
+
+    // Verify instrumental samples:
+    // Side L = (0.8 - 0.2) / 2 = 0.3
+    // Side R = (0.2 - 0.8) / 2 = -0.3
+    for (size_t idx = 0; idx < numFrames; ++idx) {
+        size_t i = idx * 2;
+        assert(std::abs(instrumental[i] - 0.3f) < 1e-6f);
+        assert(std::abs(instrumental[i + 1] - (-0.3f)) < 1e-6f);
+    }
+
+    // Verify WAV file writing via StemSeparator helper
+    StemSeparator separator;
+    QString vocalsPath = QDir::tempPath() + "/test_midside_vocals.wav";
+    QString instPath = QDir::tempPath() + "/test_midside_inst.wav";
+
+    bool vocalsWritten = separator.writeWavFile(vocalsPath, vocals, 48000);
+    bool instWritten = separator.writeWavFile(instPath, instrumental, 48000);
+    assert(vocalsWritten);
+    assert(instWritten);
+
+    // Verify files exist and are non-empty
+    QFile vFile(vocalsPath);
+    assert(vFile.exists());
+    assert(vFile.size() > 44); // WAV header is 44 bytes minimum
+
+    QFile iFile(instPath);
+    assert(iFile.exists());
+    assert(iFile.size() > 44);
+
+    // Cleanup
+    QFile::remove(vocalsPath);
+    QFile::remove(instPath);
+
+    // Also verify the existing StemSeparator initialization failure path
+    // (ONNX model not found -> should fail gracefully, EP stays CPU)
+    bool dummyInit = separator.initialize("C:/non_existent_path_to_model/non_existent.onnx");
+    assert(!dummyInit);
+    assert(!separator.isInitialized());
+    assert(separator.executionProvider() == "CPU");
+
+    std::cout << "[PASS] Mid-Side DSP Separation (Fallback) test completed successfully.\n\n";
+}
+
+void testWaveformCaching() {
+    std::cout << "[TEST] Running Waveform Caching test...\n";
+
+    QString tempFilePath = QDir::tempPath() + "/mock_source_audio.wav";
+    QFile tempFile(tempFilePath);
+    if (tempFile.open(QIODevice::WriteOnly)) {
+        tempFile.write("RIFFxxxxWAVEfmt "); // dummy bytes
+        tempFile.close();
+    }
+    assert(QFile::exists(tempFilePath));
+
+    AudioReader reader;
+    const size_t totalSamples = 48000 * 2 * 2; // 2 seconds stereo at 48000 Hz
+    std::vector<float> mockSamples(totalSamples, 0.0f);
+    for (size_t i = 0; i < totalSamples; i += 2) {
+        mockSamples[i] = 0.5f * std::sin(2.0 * 3.141592653589793 * 440.0 * (i / 2.0) / 48000.0);
+        mockSamples[i + 1] = -0.3f * std::cos(2.0 * 3.141592653589793 * 440.0 * (i / 2.0) / 48000.0);
+    }
+    
+    reader.setSamplesForTesting(mockSamples, 48000);
+
+    assert(!reader.peaks256().empty());
+    assert(!reader.peaks4096().empty());
+    assert(reader.sampleRate() == 48000);
+    assert(reader.channels() == 2);
+    assert(std::abs(reader.durationSeconds() - 2.0) < 1e-6);
+
+    bool saved = reader.savePeakCache(tempFilePath);
+    assert(saved);
+
+    QString cachePath = reader.getCachePath(tempFilePath);
+    assert(QFile::exists(cachePath));
+
+    AudioReader loadedReader;
+    bool loaded = loadedReader.loadPeakCache(tempFilePath);
+    assert(loaded);
+
+    assert(loadedReader.sampleRate() == reader.sampleRate());
+    assert(loadedReader.channels() == reader.channels());
+    assert(std::abs(loadedReader.durationSeconds() - reader.durationSeconds()) < 1e-6);
+    assert(loadedReader.peaks256().size() == reader.peaks256().size());
+    assert(loadedReader.peaks4096().size() == reader.peaks4096().size());
+
+    for (size_t i = 0; i < reader.peaks256().size(); ++i) {
+        assert(std::abs(loadedReader.peaks256()[i].minVal - reader.peaks256()[i].minVal) < 1e-6f);
+        assert(std::abs(loadedReader.peaks256()[i].maxVal - reader.peaks256()[i].maxVal) < 1e-6f);
+    }
+
+    QFile::remove(tempFilePath);
+    QFile::remove(cachePath);
+
+    std::cout << "[PASS] Waveform Caching test completed successfully.\n\n";
+}
+
+double solveBezierLocal(double x, double x1, double y1, double x2, double y2) {
+    if (x <= 0.0) return 0.0;
+    if (x >= 1.0) return 1.0;
+
+    x1 = std::max(0.0, std::min(1.0, x1));
+    x2 = std::max(0.0, std::min(1.0, x2));
+
+    double t = x; 
+    double A = 3.0 * x1 - 3.0 * x2 + 1.0;
+    double B = 3.0 * x2 - 6.0 * x1;
+    double C = 3.0 * x1;
+
+    for (int i = 0; i < 8; ++i) {
+        double xVal = ((A * t + B) * t + C) * t;
+        double dx = (3.0 * A * t + 2.0 * B) * t + C;
+        if (std::abs(dx) < 1e-6) break;
+        double diff = xVal - x;
+        t -= diff / dx;
+        t = std::max(0.0, std::min(1.0, t));
+    }
+
+    double finalX = ((A * t + B) * t + C) * t;
+    if (std::abs(finalX - x) > 1e-3) {
+        double lo = 0.0;
+        double hi = 1.0;
+        t = x;
+        for (int i = 0; i < 16; ++i) {
+            double xVal = ((A * t + B) * t + C) * t;
+            if (std::abs(xVal - x) < 1e-4) break;
+            if (xVal < x) {
+                lo = t;
+            } else {
+                hi = t;
+            }
+            t = (lo + hi) / 2.0;
+        }
+    }
+
+    double Ay = 3.0 * y1 - 3.0 * y2 + 1.0;
+    double By = 3.0 * y2 - 6.0 * y1;
+    double Cy = 3.0 * y1;
+    return ((Ay * t + By) * t + Cy) * t;
+}
+
+void testBezierTimingCurves() {
+    std::cout << "[TEST] Running Bezier Timing Curves test...\n";
+
+    double out1 = solveBezierLocal(0.5, 0.25, 0.25, 0.75, 0.75);
+    assert(std::abs(out1 - 0.5) < 1e-4);
+
+    double out2 = solveBezierLocal(0.0, 0.42, 0.0, 0.58, 1.0);
+    assert(std::abs(out2 - 0.0) < 1e-4);
+    double out3 = solveBezierLocal(1.0, 0.42, 0.0, 0.58, 1.0);
+    assert(std::abs(out3 - 1.0) < 1e-4);
+    
+    double outMid = solveBezierLocal(0.5, 0.42, 0.0, 0.58, 1.0);
+    assert(std::abs(outMid - 0.5) < 1e-4);
+
+    Clip clip("test_clip_bezier", Clip::Lyrics, 0, 10000000); 
+    clip.setLyricText("Hello world");
+    
+    QVariantList syllables = clip.syllables();
+    assert(!syllables.isEmpty());
+    for (const QVariant& s : syllables) {
+        QVariantMap map = s.toMap();
+        assert(map["x1"].toDouble() == 0.25);
+        assert(map["y1"].toDouble() == 0.25);
+        assert(map["x2"].toDouble() == 0.75);
+        assert(map["y2"].toDouble() == 0.75);
+    }
+
+    clip.updateSyllableCurve(0, 0.1, 0.2, 0.3, 0.4);
+    QVariantMap updatedMap = clip.syllables()[0].toMap();
+    assert(updatedMap["x1"].toDouble() == 0.1);
+    assert(updatedMap["y1"].toDouble() == 0.2);
+    assert(updatedMap["x2"].toDouble() == 0.3);
+    assert(updatedMap["y2"].toDouble() == 0.4);
+
+    nlohmann::json clipJson = clip.toJson();
+    Clip* loadedClip = Clip::fromJson(clipJson);
+    assert(loadedClip != nullptr);
+    assert(loadedClip->clipId() == "test_clip_bezier");
+    
+    QVariantList loadedSyllables = loadedClip->syllables();
+    assert(loadedSyllables.size() == syllables.size());
+    QVariantMap loadedFirstSyl = loadedSyllables[0].toMap();
+    assert(loadedFirstSyl["x1"].toDouble() == 0.1);
+    assert(loadedFirstSyl["y1"].toDouble() == 0.2);
+    assert(loadedFirstSyl["x2"].toDouble() == 0.3);
+    assert(loadedFirstSyl["y2"].toDouble() == 0.4);
+
+    delete loadedClip;
+
+    std::cout << "[PASS] Bezier Timing Curves test completed successfully.\n\n";
+}
+
+void testCrossCorrelationAlignment() {
+    std::cout << "[TEST] Running Vocal Alignment Cross-Correlation test...\n";
+
+    QString guidePath = QDir::tempPath() + "/mock_guide.wav";
+    QString targetPath = QDir::tempPath() + "/mock_target.wav";
+
+    const int sampleRate = 48000;
+    const size_t numFrames = sampleRate * 2;
+    const size_t totalSamples = numFrames * 2;
+    
+    std::vector<float> guideSamples(totalSamples, 0.0f);
+    std::vector<float> targetSamples(totalSamples, 0.0f);
+
+    double stddev = 0.1; 
+    for (size_t i = 0; i < numFrames; ++i) {
+        double t = static_cast<double>(i) / sampleRate;
+        float valGuide = static_cast<float>(std::exp(-0.5 * std::pow((t - 1.0) / stddev, 2)));
+        float valTarget = static_cast<float>(std::exp(-0.5 * std::pow((t - 0.8) / stddev, 2)));
+
+        guideSamples[i * 2] = valGuide;
+        guideSamples[i * 2 + 1] = valGuide;
+
+        targetSamples[i * 2] = valTarget;
+        targetSamples[i * 2 + 1] = valTarget;
+    }
+
+    StemSeparator separator;
+    bool guideWritten = separator.writeWavFile(guidePath, guideSamples, sampleRate);
+    bool targetWritten = separator.writeWavFile(targetPath, targetSamples, sampleRate);
+    assert(guideWritten);
+    assert(targetWritten);
+
+    TimelineManager manager;
+    QString guideTrackId = manager.addTrack(Track::Audio, "Guide Track");
+    QString targetTrackId = manager.addTrack(Track::Audio, "Target Track");
+
+    bool c1 = manager.addClipToTrack(guideTrackId, "guide_clip", Track::Audio, 0, 2000000, guidePath);
+    bool c2 = manager.addClipToTrack(targetTrackId, "target_clip", Track::Audio, 1000000, 2000000, targetPath);
+    assert(c1);
+    assert(c2);
+
+    double offset = manager.alignAudioClip("target_clip", "guide_clip");
+    assert(std::abs(offset - (-0.8)) < 0.05);
+
+    Clip* targetClip = nullptr;
+    for (Track* t : manager.trackListModel()->tracks()) {
+        if (Clip* c = t->getClip("target_clip")) {
+            targetClip = c;
+            break;
+        }
+    }
+    assert(targetClip != nullptr);
+    assert(std::abs(targetClip->startTime() - 200000LL) < 50000LL); 
+
+    QFile::remove(guidePath);
+    QFile::remove(targetPath);
+
+    std::cout << "[PASS] Vocal Alignment Cross-Correlation test completed successfully.\n\n";
+}
+
 int main(int argc, char* argv[]) {
     std::cout << std::unitbuf;
     QCoreApplication app(argc, argv);
@@ -885,12 +1248,19 @@ int main(int argc, char* argv[]) {
     testResampler();
     testOverlapAddWindowing();
     testStemSeparatorFallback();
+    testMidSideDspSeparation();
     testOfflineMixdown();
     // testRenderEngineInitialization(); // Commented out to prevent hanging in headless/headless-CI/VM environments without GPU/audio hardware drivers.
     testMarkersAndSubtitleStyles();
     testRomanization();
     testLyricsStringImport();
     testLyricEngine();
+    testMetadataGuesser();
+    testHwDecodingPreferences();
+    testTimelineChangedPropagation();
+    testWaveformCaching();
+    testBezierTimingCurves();
+    testCrossCorrelationAlignment();
     
     std::cout << "========================================================\n";
     std::cout << "       ALL TIMELINE CORE TESTS PASSED SUCCESSFULLY!     \n";

@@ -508,48 +508,41 @@ void RenderWorker::renderFrameAtTime(QImage& image, QImage& lowResImage, qint64 
 
     // 1. Draw Background (Video clip decoding or gradient fallback)
     bool drewVideo = false;
-    if (m_lyricDisplayMode == 2) {
-        painter.fillRect(image.rect(), QColor(0, 0, 0));
-    } else if (m_lyricDisplayMode == 3) {
-        QRectF rect = image.rect();
-        // Create dark gradient background
-        QLinearGradient bgGrad(rect.topLeft(), rect.bottomRight());
-        bgGrad.setColorAt(0.0, QColor(10, 10, 15));
-        bgGrad.setColorAt(0.5, QColor(20, 20, 30));
-        bgGrad.setColorAt(1.0, QColor(10, 10, 15));
-        painter.fillRect(rect, bgGrad);
-
-        // Apply Radial Vignette Overlay (fades out at corners)
-        QRadialGradient vignette(rect.center(), std::max(rect.width(), rect.height()) * 0.7);
-        vignette.setColorAt(0.0, QColor(0, 0, 0, 0));
-        vignette.setColorAt(0.7, QColor(0, 0, 0, 50));
-        vignette.setColorAt(1.0, QColor(0, 0, 0, 220)); // Soft cinematic shadow frame
-        painter.fillRect(rect, vignette);
-    } else {
-        if (m_showVideoBackground) {
-            Clip* activeVideoClip = nullptr;
-            for (Track* track : m_timelineManager->trackListModel()->tracks()) {
-                if (track->trackType() == Track::Video) {
-                    for (Clip* clip : track->clips()) {
-                        if (timeUs >= clip->startTime() && timeUs < clip->endTime()) {
-                            activeVideoClip = clip;
-                            break;
-                        }
+    if (m_showVideoBackground) {
+        Clip* activeVideoClip = nullptr;
+        for (Track* track : m_timelineManager->trackListModel()->tracks()) {
+            if (track->trackType() == Track::Video) {
+                for (Clip* clip : track->clips()) {
+                    if (timeUs >= clip->startTime() && timeUs < clip->endTime()) {
+                        activeVideoClip = clip;
+                        break;
                     }
                 }
-                if (activeVideoClip) break;
             }
-
-            if (activeVideoClip) {
-                qint64 sourceTimeUs = (timeUs - activeVideoClip->startTime()) + activeVideoClip->sourceStart();
-                if (t_videoReader.filePath() != activeVideoClip->sourceFile()) {
-                    t_videoReader.open(activeVideoClip->sourceFile());
-                }
-                drewVideo = t_videoReader.readFrameAt(sourceTimeUs, image);
-            }
+            if (activeVideoClip) break;
         }
 
-        if (!drewVideo) {
+        if (activeVideoClip) {
+            qint64 sourceTimeUs = (timeUs - activeVideoClip->startTime()) + activeVideoClip->sourceStart();
+            if (t_videoReader.filePath() != activeVideoClip->sourceFile()) {
+                t_videoReader.open(activeVideoClip->sourceFile());
+            }
+            drewVideo = t_videoReader.readFrameAt(sourceTimeUs, image);
+        }
+    }
+
+    if (!drewVideo) {
+        if (m_lyricDisplayMode == 2) {
+            painter.fillRect(image.rect(), QColor(0, 0, 0));
+        } else if (m_lyricDisplayMode == 3) {
+            QRectF rect = image.rect();
+            // Create dark gradient background
+            QLinearGradient bgGrad(rect.topLeft(), rect.bottomRight());
+            bgGrad.setColorAt(0.0, QColor(10, 10, 15));
+            bgGrad.setColorAt(0.5, QColor(20, 20, 30));
+            bgGrad.setColorAt(1.0, QColor(10, 10, 15));
+            painter.fillRect(rect, bgGrad);
+        } else {
             // Render slate background gradient and ambient glows on the persistent low-res canvas
             int lowW = lowResImage.width();
             int lowH = lowResImage.height();
@@ -585,6 +578,16 @@ void RenderWorker::renderFrameAtTime(QImage& image, QImage& lowResImage, qint64 
             // Upscale the soft background using smooth bilinear scaling
             painter.drawImage(image.rect(), lowResImage);
         }
+    }
+
+    // Apply Radial Vignette Overlay for Cinematic mode (mode 3) over video or fallback background
+    if (m_lyricDisplayMode == 3) {
+        QRectF rect = image.rect();
+        QRadialGradient vignette(rect.center(), std::max(rect.width(), rect.height()) * 0.7);
+        vignette.setColorAt(0.0, QColor(0, 0, 0, 0));
+        vignette.setColorAt(0.7, QColor(0, 0, 0, 50));
+        vignette.setColorAt(1.0, QColor(0, 0, 0, 220)); // Soft cinematic shadow frame
+        painter.fillRect(rect, vignette);
     }
 
     // 2. Draw NC-KTV watermark (crisp full-resolution text)

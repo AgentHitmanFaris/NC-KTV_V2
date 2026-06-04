@@ -10,6 +10,10 @@ Popup {
     anchors.centerIn: Overlay.overlay
     closePolicy: Popup.NoAutoClose
 
+    Overlay.modal: Rectangle {
+        color: Qt.rgba(0, 0, 0, 0.6)
+    }
+
     width: 500
     height: 480
 

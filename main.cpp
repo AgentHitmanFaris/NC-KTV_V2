@@ -1,7 +1,12 @@
 #include <iostream>
 #include <string>
 
-// Qt6 core, GUI, and QML components
+// Qt6 core, GUI, widgets and QML components
+#include <QApplication>
+#include <QSplashScreen>
+#include <QPixmap>
+#include <QWindow>
+#include <QColor>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -40,8 +45,48 @@ extern "C" {
 #include "youtube/youtube_manager.h"
 #include "src/gui/waveform_renderer.h"
 #include "src/gui/karaoke_lyric_renderer.h"
+#include <QObject>
+
+class SplashHandler : public QObject {
+    Q_OBJECT
+public:
+    SplashHandler(QWindow* splashWindow, QQmlComponent* mainComponent, QObject* parent = nullptr)
+        : QObject(parent), m_splashWindow(splashWindow), m_mainComponent(mainComponent) {}
+
+public slots:
+    void onLoadingFinished() {
+        std::cout << "[SYSTEM] Splash loading finished. Instantiating main window...\n";
+        if (!m_mainComponent) {
+            std::cerr << "[SYSTEM] Error: mainComponent is null!\n";
+            QCoreApplication::exit(-1);
+            return;
+        }
+        QObject* mainObj = m_mainComponent->create();
+        if (!mainObj) {
+            std::cerr << "[SYSTEM] Error: QML engine failed to load main.qml! No root objects created.\n";
+            QCoreApplication::exit(-1);
+            return;
+        }
+
+        QWindow* rootWindow = qobject_cast<QWindow*>(mainObj);
+        if (rootWindow) {
+            rootWindow->showMaximized();
+            rootWindow->raise();
+            rootWindow->requestActivate();
+        }
+
+        if (m_splashWindow) {
+            m_splashWindow->close();
+        }
+    }
+
+private:
+    QWindow* m_splashWindow;
+    QQmlComponent* m_mainComponent;
+};
 
 int main(int argc, char* argv[]) {
+    std::cout << "[DEBUG] Entered main()" << std::endl;
     // Read hardware acceleration setting before QGuiApplication is created
     QSettings settings("NC-KTV", "NC-KTV_V2");
     bool disableHw = settings.value("disable_hw_decoding", false).toBool();
@@ -53,8 +98,8 @@ int main(int argc, char* argv[]) {
     // Force Basic style to allow full QML customization and suppress native style warnings
     QQuickStyle::setStyle("Basic");
 
-    // We use QGuiApplication for hardware-accelerated QML rendering
-    QGuiApplication app(argc, argv);
+    // We use QApplication
+    QApplication app(argc, argv);
 
     // Set application icon (taskbar, Alt+Tab, title bar)
     QIcon appIcon(":/qt/qml/ncktv/gui/logo.png");
@@ -113,18 +158,29 @@ int main(int argc, char* argv[]) {
         }
     });
 
-    // Load main application QML window
-    const QUrl url(u"qrc:/ncktv/gui/main.qml"_qs);
-    QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed,
-        &app, []() { QCoreApplication::exit(-1); },
-        Qt::QueuedConnection);
-    
-    engine.load(url);
+    // 1. Load the QML-based startup splash screen window
+    const QUrl splashUrl(u"qrc:/ncktv/gui/SplashScreenWindow.qml"_qs);
+    engine.load(splashUrl);
 
     if (engine.rootObjects().isEmpty()) {
-        std::cerr << "[SYSTEM] Error: QML engine failed to load main.qml! No root objects created.\n";
+        std::cerr << "[SYSTEM] Error: QML engine failed to load SplashScreenWindow.qml!\n";
         return 1;
     }
 
+    QObject* splashObj = engine.rootObjects().first();
+    QWindow* splashWindow = qobject_cast<QWindow*>(splashObj);
+
+    // Process events to render the splash window and start animations immediately
+    app.processEvents();
+
+    // 2. Prepare the main QML component in the background
+    QQmlComponent* mainComponent = new QQmlComponent(&engine, QUrl(u"qrc:/ncktv/gui/main.qml"_qs), &app);
+
+    // 3. Connect the loadingFinished signal using SplashHandler helper
+    SplashHandler handler(splashWindow, mainComponent, &app);
+    QObject::connect(splashObj, SIGNAL(loadingFinished()), &handler, SLOT(onLoadingFinished()));
+
     return app.exec();
 }
+
+#include "main.moc"

@@ -15,6 +15,10 @@ struct WordTiming {
     QString text;
     qint64 relativeStartUs = 0;  // Relative to line start
     qint64 durationUs = 0;
+    double x1 = 0.25;
+    double y1 = 0.25;
+    double x2 = 0.75;
+    double y2 = 0.75;
 };
 
 struct LyricLine {

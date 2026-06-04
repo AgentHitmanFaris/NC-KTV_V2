@@ -70,8 +70,10 @@ bool StemSeparator::initialize(const QString& modelPath) {
             m_executionProvider = "DirectML";
             ep_registered = true;
             std::cout << "[StemSeparator] DirectML hardware acceleration registered successfully.\n";
+        } catch (const Ort::Exception& e) {
+            std::cout << "[StemSeparator] DirectML not available, trying CUDA... Ort::Exception: " << e.what() << "\n";
         } catch (const std::exception& e) {
-            std::cout << "[StemSeparator] DirectML not available, trying CUDA... Info: " << e.what() << "\n";
+            std::cout << "[StemSeparator] DirectML not available, trying CUDA... std::exception: " << e.what() << "\n";
         }
 
         if (!ep_registered) {
@@ -83,8 +85,10 @@ bool StemSeparator::initialize(const QString& modelPath) {
                 m_executionProvider = "CUDA";
                 ep_registered = true;
                 std::cout << "[StemSeparator] CUDA hardware acceleration registered successfully.\n";
+            } catch (const Ort::Exception& e) {
+                std::cout << "[StemSeparator] CUDA not available, falling back to CPU. Ort::Exception: " << e.what() << "\n";
             } catch (const std::exception& e) {
-                std::cout << "[StemSeparator] CUDA not available, falling back to CPU. Info: " << e.what() << "\n";
+                std::cout << "[StemSeparator] CUDA not available, falling back to CPU. std::exception: " << e.what() << "\n";
             }
         }
 #endif
@@ -242,8 +246,8 @@ bool StemSeparator::separate(const std::vector<float>& input48kStereo,
 
     Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
 
-    std::vector<float> vocals_spectrogram(4 * num_bins * num_frames, 0.0f);
-    std::vector<float> vocals_weights(num_frames, 0.0f);
+    std::vector<float> model_output_spectrogram(4 * num_bins * num_frames, 0.0f);
+    std::vector<float> model_output_weights(num_frames, 0.0f);
 
     const size_t O_frame = 32; // Overlap size on frame level
     const size_t S_frame = W_frame - O_frame;
@@ -271,7 +275,7 @@ bool StemSeparator::separate(const std::vector<float>& input48kStereo,
             if (!output_tensors.empty()) {
                 float* out_data = output_tensors[0].GetTensorMutableData<float>();
 
-                // Overlap-add vocals spectrogram using a cosine OLA window on the frame/time axis
+                // Overlap-add model output spectrogram using a cosine OLA window on the frame/time axis
                 for (size_t t = 0; t < chunk_len_frame; ++t) {
                     float weight = 1.0f;
                     if (offset_frame > 0 && t < O_frame) {
@@ -286,12 +290,12 @@ bool StemSeparator::separate(const std::vector<float>& input48kStereo,
 
                     size_t global_frame = offset_frame + t;
                     if (global_frame < num_frames) {
-                        vocals_weights[global_frame] += weight;
+                        model_output_weights[global_frame] += weight;
                         for (int c = 0; c < 4; ++c) {
                             for (int b = 0; b < num_bins; ++b) {
                                 size_t idx = c * (num_bins * W_frame) + b * W_frame + t;
                                 size_t dest_idx = (c * num_bins + b) * num_frames + global_frame;
-                                vocals_spectrogram[dest_idx] += out_data[idx] * weight;
+                                model_output_spectrogram[dest_idx] += out_data[idx] * weight;
                             }
                         }
                     }
@@ -314,23 +318,37 @@ bool StemSeparator::separate(const std::vector<float>& input48kStereo,
         }
     }
 
-    // Normalize vocals spectrogram by overlap weights (with cache-friendly loop order)
+    // Normalize model output spectrogram by overlap weights (with cache-friendly loop order)
     for (int c = 0; c < 4; ++c) {
         for (int b = 0; b < num_bins; ++b) {
             size_t base_idx = (c * num_bins + b) * num_frames;
             for (size_t f = 0; f < num_frames; ++f) {
-                float w = vocals_weights[f];
+                float w = model_output_weights[f];
                 if (w > 1e-5f) {
-                    vocals_spectrogram[base_idx + f] /= w;
+                    model_output_spectrogram[base_idx + f] /= w;
                 }
             }
         }
     }
 
-    // Compute instrumental complex spectrogram: instrumental = input - vocals (contiguous flat structure allows compiler vectorization)
+    // Determine target stems based on model type (Vocals vs Instrumental/Backing)
+    bool isInstrumentalModel = m_modelName.toLower().contains("inst") || m_modelName.toLower().contains("backing") || m_modelName.toLower().contains("kara");
+
+    std::vector<float> vocals_spectrogram(4 * num_bins * num_frames);
     std::vector<float> instrumental_spectrogram(4 * num_bins * num_frames);
-    for (size_t i = 0; i < spectrogram.size(); ++i) {
-        instrumental_spectrogram[i] = spectrogram[i] - vocals_spectrogram[i];
+
+    if (isInstrumentalModel) {
+        // Model output is instrumental; vocals = input - instrumental
+        std::memcpy(instrumental_spectrogram.data(), model_output_spectrogram.data(), model_output_spectrogram.size() * sizeof(float));
+        for (size_t i = 0; i < spectrogram.size(); ++i) {
+            vocals_spectrogram[i] = spectrogram[i] - instrumental_spectrogram[i];
+        }
+    } else {
+        // Model output is vocals; instrumental = input - vocals
+        std::memcpy(vocals_spectrogram.data(), model_output_spectrogram.data(), model_output_spectrogram.size() * sizeof(float));
+        for (size_t i = 0; i < spectrogram.size(); ++i) {
+            instrumental_spectrogram[i] = spectrogram[i] - vocals_spectrogram[i];
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -458,7 +476,7 @@ bool StemSeparator::separate(const std::vector<float>& input48kStereo,
         return false;
     }
 
-    // Write WAV files with corrected channel stem mappings
+    // Write WAV files with correct stem mappings
     if (!writeWavFile(vocalsPath, vocals48k, 48000)) return false;
     if (!writeWavFile(instrumentalPath, inst48k, 48000)) return false;
 

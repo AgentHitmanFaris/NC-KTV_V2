@@ -2,6 +2,9 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QDir>
+#include <QCryptographicHash>
+#include <QStandardPaths>
+#include <QDateTime>
 #include <iostream>
 #include <algorithm>
 
@@ -164,6 +167,9 @@ bool AudioReader::decodeFile(const QString& filePath, int targetSampleRate) {
     // Precompute Peak Levels for Level of Details Waveform drawing
     precomputePeaks();
 
+    // Save precomputed peaks to cache file
+    savePeakCache(filePath);
+
     std::cout << "[AudioReader] Successfully decoded file: " << pathStr 
               << " (" << m_durationSeconds << "s, " << m_samples.size() << " raw float samples)\n";
     return true;
@@ -214,6 +220,132 @@ void AudioReader::precomputePeaks() {
         }
         m_peaks4096.push_back({minVal, maxVal});
     }
+}
+
+struct PeakCacheHeader {
+    char magic[4] = {'N', 'C', 'P', 'K'};
+    uint32_t version = 1;
+    qint64 sourceFileSize = 0;
+    qint64 sourceLastModified = 0;
+    uint32_t numPeaks256 = 0;
+    uint32_t numPeaks4096 = 0;
+    int sampleRate = 48000;
+    int channels = 2;
+    double durationSeconds = 0.0;
+};
+
+QString AudioReader::getCachePath(const QString& filePath) const {
+    // Attempt 1: Next to original file
+    QString primaryPath = filePath + ".pk";
+    QFileInfo fi(primaryPath);
+    QDir dir = fi.dir();
+    if (dir.exists()) {
+        QFile file(primaryPath);
+        if (file.open(QIODevice::ReadWrite)) {
+            file.close();
+            return primaryPath;
+        }
+    }
+    
+    // Attempt 2: Fall back to local AppData cache folder
+    QString appLocal = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    QString cacheDir = QDir(appLocal).filePath("cache");
+    QDir().mkpath(cacheDir);
+    
+    QByteArray hash = QCryptographicHash::hash(filePath.toUtf8(), QCryptographicHash::Md5).toHex();
+    return QDir(cacheDir).filePath(QString::fromUtf8(hash) + ".pk");
+}
+
+bool AudioReader::loadPeakCache(const QString& filePath) {
+    QString cachePath = getCachePath(filePath);
+    QFile file(cachePath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return false;
+    }
+
+    QFileInfo sourceInfo(filePath);
+    if (!sourceInfo.exists()) {
+        return false;
+    }
+    qint64 expectedSize = sourceInfo.size();
+    qint64 expectedMod = sourceInfo.lastModified().toMSecsSinceEpoch();
+
+    PeakCacheHeader header;
+    if (file.read(reinterpret_cast<char*>(&header), sizeof(header)) != sizeof(header)) {
+        return false;
+    }
+
+    if (std::strncmp(header.magic, "NCPK", 4) != 0 ||
+        header.version != 1 ||
+        header.sourceFileSize != expectedSize ||
+        header.sourceLastModified != expectedMod) {
+        return false;
+    }
+
+    m_peaks256.resize(header.numPeaks256);
+    if (file.read(reinterpret_cast<char*>(m_peaks256.data()), header.numPeaks256 * sizeof(Peak)) != static_cast<qint64>(header.numPeaks256 * sizeof(Peak))) {
+        m_peaks256.clear();
+        return false;
+    }
+
+    m_peaks4096.resize(header.numPeaks4096);
+    if (file.read(reinterpret_cast<char*>(m_peaks4096.data()), header.numPeaks4096 * sizeof(Peak)) != static_cast<qint64>(header.numPeaks4096 * sizeof(Peak))) {
+        m_peaks256.clear();
+        m_peaks4096.clear();
+        return false;
+    }
+
+    m_sampleRate = header.sampleRate;
+    m_channels = header.channels;
+    m_durationSeconds = header.durationSeconds;
+    m_samples.clear(); // Loaded in background
+
+    std::cout << "[AudioReader] Peak cache loaded successfully from: " << cachePath.toStdString() << "\n";
+    return true;
+}
+
+bool AudioReader::savePeakCache(const QString& filePath) {
+    if (m_peaks256.empty() || m_peaks4096.empty()) {
+        return false;
+    }
+
+    QString cachePath = getCachePath(filePath);
+    QFile file(cachePath);
+    if (!file.open(QIODevice::WriteOnly)) {
+        std::cerr << "[AudioReader] Warning: Could not open peak cache for writing at: " << cachePath.toStdString() << "\n";
+        return false;
+    }
+
+    QFileInfo sourceInfo(filePath);
+    if (!sourceInfo.exists()) {
+        return false;
+    }
+
+    PeakCacheHeader header;
+    std::memcpy(header.magic, "NCPK", 4);
+    header.version = 1;
+    header.sourceFileSize = sourceInfo.size();
+    header.sourceLastModified = sourceInfo.lastModified().toMSecsSinceEpoch();
+    header.numPeaks256 = static_cast<uint32_t>(m_peaks256.size());
+    header.numPeaks4096 = static_cast<uint32_t>(m_peaks4096.size());
+    header.sampleRate = m_sampleRate;
+    header.channels = m_channels;
+    header.durationSeconds = m_durationSeconds;
+
+    if (file.write(reinterpret_cast<const char*>(&header), sizeof(header)) != sizeof(header)) {
+        return false;
+    }
+
+    if (file.write(reinterpret_cast<const char*>(m_peaks256.data()), m_peaks256.size() * sizeof(Peak)) != static_cast<qint64>(m_peaks256.size() * sizeof(Peak))) {
+        return false;
+    }
+
+    if (file.write(reinterpret_cast<const char*>(m_peaks4096.data()), m_peaks4096.size() * sizeof(Peak)) != static_cast<qint64>(m_peaks4096.size() * sizeof(Peak))) {
+        return false;
+    }
+
+    std::cout << "[AudioReader] Peak cache saved successfully to: " << cachePath.toStdString() << "\n";
+    return true;
 }
 
 } // namespace ncktv

@@ -9,6 +9,7 @@ namespace ncktv {
 WaveformRenderer::WaveformRenderer(QQuickItem* parent)
     : QQuickPaintedItem(parent) {
     setAntialiasing(true);
+    setRenderTarget(QQuickPaintedItem::FramebufferObject);
 }
 
 void WaveformRenderer::setSourceFile(const QString& filePath) {
@@ -45,6 +46,12 @@ void WaveformRenderer::paint(QPainter* painter) {
     if (w <= 0.0 || h <= 0.0) {
         return;
     }
+
+    // Clear destination rect to transparent to prevent double buffering ghosting
+    painter->save();
+    painter->setCompositionMode(QPainter::CompositionMode_Source);
+    painter->fillRect(0, 0, w, h, Qt::transparent);
+    painter->restore();
 
     // Check if cache is valid
     bool cacheValid = (m_cachedSourceFile == m_sourceFile &&
@@ -102,7 +109,10 @@ void WaveformRenderer::paint(QPainter* painter) {
         float max_h = (h / 2.0f) * 0.9f; // Leave 10% padding
         float y_center = h / 2.0f;
 
-        // Draw individual dual-sided rounded bars
+        // Draw dual-sided rounded bars in a single batched vector call for maximum GPU pipeline efficiency
+        QList<QLineF> lines;
+        lines.reserve(static_cast<int>(w / barSpacing) + 1);
+
         for (float x = barWidth / 2.0f; x < w; x += barSpacing) {
             // Map x coordinate to absolute microsecond time in the source file
             double progress = x / w;
@@ -125,8 +135,9 @@ void WaveformRenderer::paint(QPainter* painter) {
                 y_bottom = y_center + 1.0f;
             }
 
-            cachePainter.drawLine(QPointF(x, y_top), QPointF(x, y_bottom));
+            lines.append(QLineF(x, y_top, x, y_bottom));
         }
+        cachePainter.drawLines(lines);
     }
 
     cachePainter.end();

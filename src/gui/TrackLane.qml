@@ -54,6 +54,7 @@ Rectangle {
                 // Track Name Label
                 RowLayout {
                     spacing: 4
+                    Layout.fillWidth: true
                     Rectangle {
                         width: 4
                         height: 12
@@ -67,6 +68,36 @@ Rectangle {
                         color: rootWindow.colorTextPrimary
                         elide: Text.ElideRight
                         Layout.fillWidth: true
+                    }
+
+                    // Compact M, L, X header controls for track heights < 55
+                    Row {
+                        visible: trackLaneRoot.height < 55
+                        spacing: 2
+                        
+                        Button {
+                            implicitWidth: 18; implicitHeight: 18
+                            checked: trackMuted
+                            onClicked: if (trackData) trackData.isMuted = !trackData.isMuted
+                            background: Rectangle { color: parent.checked ? "#EF5350" : "#2C2C35"; radius: 2 }
+                            contentItem: Text { text: "M"; font.bold: true; font.pixelSize: 10; color: parent.checked ? "#FFF" : "#8A8A9E"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                        }
+                        
+                        Button {
+                            implicitWidth: 18; implicitHeight: 18
+                            checked: trackLocked
+                            onClicked: if (trackData) trackData.isLocked = !trackData.isLocked
+                            background: Rectangle { color: parent.checked ? "#FFB74D" : "#2C2C35"; radius: 2 }
+                            contentItem: Text { text: "L"; font.bold: true; font.pixelSize: 10; color: parent.checked ? "#000" : "#8A8A9E"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                        }
+                        
+                        Button {
+                            id: removeTrackBtn
+                            implicitWidth: 18; implicitHeight: 18
+                            onClicked: if (trackData) timelineManager.removeTrack(trackData.trackId)
+                            background: Rectangle { color: removeTrackBtn.hovered ? "#C62828" : "#2C2C35"; radius: 2 }
+                            contentItem: Text { text: "X"; font.bold: true; font.pixelSize: 10; color: removeTrackBtn.hovered ? "#FFF" : "#8A8A9E"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                        }
                     }
                 }
 

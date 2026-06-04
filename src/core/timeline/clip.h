@@ -69,11 +69,14 @@ public:
     // Update a single syllable's relative start time and duration
     Q_INVOKABLE void updateSyllable(int index, qint64 relativeStart, qint64 duration);
     
+    // Update a single syllable's Bezier timing curve coordinates
+    Q_INVOKABLE void updateSyllableCurve(int index, double x1, double y1, double x2, double y2);
+    
     // Romanizes the lyric text and syllables in-place
     Q_INVOKABLE void romanize();
     
     // Generates word timings evenly spread across the clip's duration
-    void autoGenerateSyllables();
+    Q_INVOKABLE void autoGenerateSyllables();
 
     // Serialization
     [[nodiscard]] nlohmann::json toJson() const;

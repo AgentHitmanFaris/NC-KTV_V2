@@ -13,6 +13,11 @@ else()
     )
 endif()
 
+# Set binary output directory to the root build folder to match tests and ensure correct windeployqt behavior
+set_target_properties(NC-KTV_V2 PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
 # Copy logo from assets to gui source dir for Qt resource embedding & Windows resource compiler
 configure_file(
     ${CMAKE_SOURCE_DIR}/assets/logo.png
@@ -25,7 +30,7 @@ configure_file(
     COPYONLY
 )
 configure_file(
-    "${CMAKE_SOURCE_DIR}/splash screen/end.mp4"
+    "${CMAKE_SOURCE_DIR}/splash/end.mp4"
     "${CMAKE_CURRENT_SOURCE_DIR}/end.mp4"
     COPYONLY
 )
@@ -43,6 +48,8 @@ qt_add_qml_module(NC-KTV_V2
         PropertiesPanel.qml
         ExportDialog.qml
         KaraokeLyricView.qml
+        LyricTunerWindow.qml
+        SplashScreenWindow.qml
     SOURCES
         waveform_renderer.h
         waveform_renderer.cpp
@@ -71,7 +78,7 @@ target_link_libraries(NC-KTV_V2
 if(WIN32)
     # 1. Copy ONNX Runtime DLLs (including providers for CUDA/TensorRT/etc.)
     if(TARGET onnx_shared)
-        file(GLOB ORT_DLLS "${onnxruntime_SOURCE_DIR}/lib/*.dll")
+        file(GLOB ORT_DLLS "${onnxruntime_SOURCE_DIR}/runtimes/win-x64/native/*.dll")
         foreach(DLL_PATH ${ORT_DLLS})
             add_custom_command(TARGET NC-KTV_V2 POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -98,11 +105,7 @@ if(WIN32)
     )
     if(WINDEPLOYQT_EXECUTABLE)
         add_custom_command(TARGET NC-KTV_V2 POST_BUILD
-            COMMAND "${WINDEPLOYQT_EXECUTABLE}"
-                --no-translations
-                --no-compiler-runtime
-                --qmldir "${CMAKE_CURRENT_SOURCE_DIR}"
-                $<TARGET_FILE:NC-KTV_V2>
+            COMMAND cmd.exe /C "set \"PATH=${CMAKE_PREFIX_PATH}/bin;%PATH%\" && ${WINDEPLOYQT_EXECUTABLE} --no-translations --no-compiler-runtime --debug --qmldir ${CMAKE_CURRENT_SOURCE_DIR} $<TARGET_FILE:NC-KTV_V2> || exit 0"
             COMMENT "Running windeployqt6 to deploy Qt runtime dependencies..."
         )
     else()

@@ -14,7 +14,7 @@ Rectangle {
     property int matchingCount: 0
 
     // Tabbed Navigation
-    property int currentTab: 0 // 0 = Library, 1 = Lyrics, 2 = YouTube
+    property int currentTab: 0 // 0 = Library, 1 = Lyrics, 2 = YouTube, 3 = SysInfo
     
     // Lyrics finder states
     property var selectedLrcItem: null
@@ -85,9 +85,24 @@ Rectangle {
             lblYtStatus.text = results.length > 0 ? "" : "No results found.";
         }
         
+        function onMoreResultsLoaded(results) {
+            for (var i = 0; i < results.length; ++i) {
+                ytResultsModel.append(results[i]);
+            }
+            if (results.length === 0) {
+                lblYtStatus.text = "No more results found.";
+            } else {
+                lblYtStatus.text = "";
+            }
+        }
+        
         function onSearchFailed(error) {
-            ytResultsModel.clear();
-            lblYtStatus.text = error;
+            if (ytResultsModel.count === 0) {
+                ytResultsModel.clear();
+                lblYtStatus.text = error;
+            } else {
+                lblYtStatus.text = "Failed to load more results: " + error;
+            }
         }
         
         function onDownloadProgress(videoId, progress) {
@@ -356,7 +371,7 @@ Rectangle {
         
         // Save directly in the project's 'video' folder
         var saveDir = "D:/Document/NC-Project/NC-KTV/NC-KTV_V2/video";
-        youtubeManager.download(videoId, audioOnly, saveDir);
+        youtubeManager.download(videoId, audioOnly, saveDir, title);
     }
 
     ColumnLayout {
@@ -373,7 +388,8 @@ Rectangle {
                 model: [
                     { "text": "LIBRARY", "tabIdx": 0 },
                     { "text": "LYRICS FINDER", "tabIdx": 1 },
-                    { "text": "YT DISCOVER", "tabIdx": 2 }
+                    { "text": "YT DISCOVER", "tabIdx": 2 },
+                    { "text": "SYS INFO", "tabIdx": 3 }
                 ]
                 delegate: Button {
                     id: tabBtn
@@ -735,10 +751,69 @@ Rectangle {
                         spacing: 6
 
                         Label {
+                            text: "Model:"
+                            font.pixelSize: 12
+                            font.bold: true
+                            color: rootWindow.colorTextSecondary
+                            Layout.alignment: Qt.AlignVCenter
+                        }
+
+                        ComboBox {
+                            id: modelComboMedia
                             Layout.fillWidth: true
-                            text: "Model: " + (timelineManager.modelPath !== "" ? 
+                            visible: timelineManager.discoveredModels.length > 0
+                            model: timelineManager.discoveredModels
+                            currentIndex: {
+                                var idx = timelineManager.discoveredModelPaths.indexOf(timelineManager.modelPath);
+                                return idx !== -1 ? idx : 0;
+                            }
+                            onActivated: (index) => {
+                                timelineManager.modelPath = timelineManager.discoveredModelPaths[index];
+                            }
+                            
+                            delegate: ItemDelegate {
+                                width: modelComboMedia.width
+                                contentItem: Text {
+                                    text: modelData
+                                    color: highlighted ? "#FFF" : "#8A8A9E"
+                                    font.bold: highlighted
+                                    font.pixelSize: 12
+                                    font.family: "Outfit"
+                                    elide: Text.ElideRight
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                background: Rectangle {
+                                    color: highlighted ? "#2D264A" : "#111115"
+                                }
+                            }
+
+                            contentItem: Text {
+                                leftPadding: 6
+                                rightPadding: 20
+                                text: modelComboMedia.currentText
+                                font.pixelSize: 12
+                                font.bold: true
+                                font.family: "Outfit"
+                                color: rootWindow.colorAccentGreen
+                                verticalAlignment: Text.AlignVCenter
+                                elide: Text.ElideMiddle
+                            }
+
+                            background: Rectangle {
+                                implicitHeight: 20
+                                color: "#16161C"
+                                border.color: "#2C2C3A"
+                                border.width: 1
+                                radius: 4
+                            }
+                        }
+
+                        Label {
+                            Layout.fillWidth: true
+                            visible: timelineManager.discoveredModels.length === 0
+                            text: timelineManager.modelPath !== "" ? 
                                   timelineManager.modelPath.substring(timelineManager.modelPath.lastIndexOf('/') + 1) 
-                                  : "DSP MS Fallback")
+                                  : "DSP MS Fallback"
                             font.pixelSize: 12
                             color: rootWindow.colorTextSecondary
                             elide: Text.ElideMiddle
@@ -746,6 +821,7 @@ Rectangle {
 
                         Button {
                             id: btnSelectFileMedia
+                            visible: timelineManager.discoveredModels.length === 0
                             text: "Model..."
                             implicitWidth: 55
                             implicitHeight: 18
@@ -949,8 +1025,8 @@ Rectangle {
                 delegate: Rectangle {
                     width: lrcListView.width
                     height: 40
-                    color: (mediaBrowserRoot.selectedLrcItem === model) ? "#211B35" : (lrcHover.hovered ? rootWindow.colorBgCard : "#15151D")
-                    border.color: (mediaBrowserRoot.selectedLrcItem === model) ? rootWindow.colorAccentGreen : "#222"
+                    color: (mediaBrowserRoot.selectedLrcItem && mediaBrowserRoot.selectedLrcItem.id === model.id) ? "#211B35" : (lrcHover.hovered ? rootWindow.colorBgCard : "#15151D")
+                    border.color: (mediaBrowserRoot.selectedLrcItem && mediaBrowserRoot.selectedLrcItem.id === model.id) ? rootWindow.colorAccentGreen : "#222"
                     border.width: 1
                     radius: 4
 
@@ -1101,6 +1177,8 @@ Rectangle {
                     enabled: !youtubeManager.isSearching
                     onClicked: {
                         mediaBrowserRoot.selectedYtItem = null;
+                        ytResultsModel.clear();
+                        lblYtStatus.text = "";
                         youtubeManager.search(txtYtQuery.text);
                     }
                     background: Rectangle {
@@ -1141,14 +1219,14 @@ Rectangle {
                 model: ytResultsModel
                 clip: true
                 spacing: 5
-                visible: count > 0 && !youtubeManager.isSearching
+                visible: count > 0
 
                 delegate: Rectangle {
                     width: ytListView.width
                     height: 52
                     clip: true
-                    color: (mediaBrowserRoot.selectedYtItem === model) ? "#211B35" : (ytHover.hovered ? rootWindow.colorBgCard : "#15151D")
-                    border.color: (mediaBrowserRoot.selectedYtItem === model) ? rootWindow.colorAccentGreen : "#222"
+                    color: (mediaBrowserRoot.selectedYtItem && mediaBrowserRoot.selectedYtItem.id === model.id) ? "#211B35" : (ytHover.hovered ? rootWindow.colorBgCard : "#15151D")
+                    border.color: (mediaBrowserRoot.selectedYtItem && mediaBrowserRoot.selectedYtItem.id === model.id) ? rootWindow.colorAccentGreen : "#222"
                     border.width: 1
                     radius: 4
 
@@ -1227,12 +1305,49 @@ Rectangle {
                         anchors.fill: parent
                         onClicked: {
                             mediaBrowserRoot.selectedYtItem = {
-                                "id": id,
-                                "title": title,
-                                "channel": channel,
-                                "thumbnail": thumbnail,
-                                "durationStr": durationStr
+                                "id": model.id,
+                                "title": model.title,
+                                "channel": model.channel,
+                                "thumbnail": model.thumbnail,
+                                "durationStr": model.durationStr
                             };
+                        }
+                    }
+                }
+
+                footer: Component {
+                    Item {
+                        width: ytListView.width
+                        height: youtubeManager.hasMoreResults ? 50 : 0
+                        visible: youtubeManager.hasMoreResults
+                        clip: true
+
+                        Button {
+                            id: btnLoadMore
+                            anchors.centerIn: parent
+                            width: parent.width - 20
+                            height: 36
+                            enabled: !youtubeManager.isSearching
+
+                            background: Rectangle {
+                                color: btnLoadMore.pressed ? "#1E1E26" : (btnLoadMore.hovered ? rootWindow.colorAccentViolet : "#16161D")
+                                border.color: rootWindow.colorBorder
+                                border.width: 1
+                                radius: 6
+                            }
+
+                            contentItem: Text {
+                                text: youtubeManager.isSearching ? "⏳ Loading more results..." : "📥 Load More Results"
+                                font.bold: true
+                                font.pixelSize: 13
+                                color: btnLoadMore.enabled ? "#FFF" : "#888"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+
+                            onClicked: {
+                                youtubeManager.searchMore();
+                            }
                         }
                     }
                 }
@@ -1479,6 +1594,167 @@ Rectangle {
                             color: "#FFF"
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
+                        }
+                    }
+                }
+            }
+        }
+
+        // TAB 3: SYSTEM HARDWARE INFORMATION
+        ScrollView {
+            id: sysInfoTab
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            clip: true
+            visible: mediaBrowserRoot.currentTab === 3
+
+            ColumnLayout {
+                width: sysInfoTab.width - 16
+                spacing: 12
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label {
+                        text: "SYSTEM HARDWARE INFORMATION"
+                        font.bold: true
+                        font.pixelSize: 15
+                        font.family: "Outfit"
+                        color: rootWindow.colorAccentViolet
+                    }
+                }
+
+                // Glassmorphism System Specs Card
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: 290
+                    color: "#161224"
+                    border.color: "#322659"
+                    border.width: 1
+                    radius: 8
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 14
+                        spacing: 10
+
+                        // OS
+                        ColumnLayout {
+                            spacing: 2
+                            Label {
+                                text: "OPERATING SYSTEM"
+                                font.pixelSize: 10
+                                font.bold: true
+                                color: rootWindow.colorTextSecondary
+                            }
+                            Label {
+                                text: timelineManager.osInfo
+                                font.pixelSize: 13
+                                font.bold: true
+                                color: "#FFF"
+                            }
+                        }
+
+                        // CPU
+                        ColumnLayout {
+                            spacing: 2
+                            Label {
+                                text: "PROCESSOR (CPU)"
+                                font.pixelSize: 10
+                                font.bold: true
+                                color: rootWindow.colorTextSecondary
+                            }
+                            Label {
+                                text: timelineManager.cpuInfo
+                                font.pixelSize: 13
+                                font.bold: true
+                                color: "#FFF"
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                            }
+                        }
+
+                        // Memory
+                        ColumnLayout {
+                            spacing: 2
+                            Label {
+                                text: "SYSTEM MEMORY (RAM)"
+                                font.pixelSize: 10
+                                font.bold: true
+                                color: rootWindow.colorTextSecondary
+                            }
+                            Label {
+                                text: timelineManager.ramInfo
+                                font.pixelSize: 13
+                                font.bold: true
+                                color: "#FFF"
+                            }
+                        }
+
+                        // GPU
+                        ColumnLayout {
+                            spacing: 2
+                            Label {
+                                text: "GRAPHICS HARDWARE (GPU)"
+                                font.pixelSize: 10
+                                font.bold: true
+                                color: rootWindow.colorTextSecondary
+                            }
+                            Label {
+                                text: timelineManager.gpuInfo
+                                font.pixelSize: 13
+                                font.bold: true
+                                color: "#FFF"
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                            }
+                        }
+
+                        // ONNX Runtime EP
+                        ColumnLayout {
+                            spacing: 2
+                            Label {
+                                text: "ONNX RUNTIME ACCELERATORS"
+                                font.pixelSize: 10
+                                font.bold: true
+                                color: rootWindow.colorTextSecondary
+                            }
+                            Label {
+                                text: timelineManager.onnxProviderInfo
+                                font.pixelSize: 13
+                                font.bold: true
+                                color: rootWindow.colorAccentGreen
+                            }
+                        }
+                    }
+                }
+
+                // AI GPU Acceleration Guidelines/Troubleshooting Card
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: 110
+                    color: "#1E1528"
+                    border.color: "#4A1A4E"
+                    border.width: 1
+                    radius: 8
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        spacing: 4
+
+                        Label {
+                            text: "💡 GPU Acceleration Troubleshooting"
+                            font.pixelSize: 12
+                            font.bold: true
+                            color: "#FFAB40"
+                        }
+
+                        Label {
+                            text: "If GPU/CUDA is available but falls back to CPU, ensure you have:\n1. NVIDIA GPU drivers updated to the latest version.\n2. CUDA Toolkit 12.x and cuDNN 8.9+ installed on your system.\n3. Added CUDA/cuDNN DLLs folder to your system PATH environment variable."
+                            font.pixelSize: 11
+                            color: "#B0A2C7"
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
                         }
                     }
                 }

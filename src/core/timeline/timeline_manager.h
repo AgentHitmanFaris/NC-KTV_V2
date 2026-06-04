@@ -53,6 +53,11 @@ class TimelineManager : public QObject {
     Q_PROPERTY(bool showSourceMonitor READ showSourceMonitor WRITE setShowSourceMonitor NOTIFY showSourceMonitorChanged)
     Q_PROPERTY(LyricEngine* lyricEngine READ lyricEngine CONSTANT)
     Q_PROPERTY(bool disableHwDecoding READ disableHwDecoding WRITE setDisableHwDecoding NOTIFY disableHwDecodingChanged)
+    Q_PROPERTY(QString cpuInfo READ cpuInfo CONSTANT)
+    Q_PROPERTY(QString gpuInfo READ gpuInfo CONSTANT)
+    Q_PROPERTY(QString ramInfo READ ramInfo CONSTANT)
+    Q_PROPERTY(QString osInfo READ osInfo CONSTANT)
+    Q_PROPERTY(QString onnxProviderInfo READ onnxProviderInfo CONSTANT)
 
 public:
     explicit TimelineManager(QObject* parent = nullptr);
@@ -70,6 +75,11 @@ public:
 
     [[nodiscard]] QStringList discoveredModels() const { return m_discoveredModels; }
     [[nodiscard]] QStringList discoveredModelPaths() const { return m_discoveredModelPaths; }
+    [[nodiscard]] QString cpuInfo() const { return m_cpuInfo; }
+    [[nodiscard]] QString gpuInfo() const { return m_gpuInfo; }
+    [[nodiscard]] QString ramInfo() const { return m_ramInfo; }
+    [[nodiscard]] QString osInfo() const { return m_osInfo; }
+    [[nodiscard]] QString onnxProviderInfo() const { return m_onnxProviderInfo; }
 
     Q_INVOKABLE void scanModelsDir();
 
@@ -177,6 +187,9 @@ public:
     // Romanization
     Q_INVOKABLE [[nodiscard]] QString romanizeText(const QString& text) const;
     Q_INVOKABLE void romanizeClip(QObject* clipObj);
+    
+    // Vocal Alignment Helper
+    Q_INVOKABLE double alignAudioClip(const QString& targetClipId, const QString& referenceClipId = QString());
     
     // Snapping Engine
     Q_INVOKABLE qint64 checkSnapping(const QString& excludeClipId, qint64 targetTimeMicroseconds, qint64 thresholdMicroseconds) const;
@@ -292,6 +305,13 @@ private:
     QString m_artistName = "Unknown Artist";
     int m_introSplashDuration = 3000;
     QString m_endingVideoPath = "splash_screen/end.mp4";
+
+    QString m_cpuInfo;
+    QString m_gpuInfo;
+    QString m_ramInfo;
+    QString m_osInfo;
+    QString m_onnxProviderInfo;
+    void detectSystemInfo();
 };
 
 

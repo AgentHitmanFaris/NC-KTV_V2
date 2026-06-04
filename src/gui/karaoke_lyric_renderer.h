@@ -24,6 +24,10 @@ struct LyricWordTiming {
     QString text;
     qint64 startTime = 0; // Relative to line start or absolute timeline (in milliseconds)
     qint64 endTime = 0;
+    double x1 = 0.25;
+    double y1 = 0.25;
+    double x2 = 0.75;
+    double y2 = 0.75;
 };
 
 struct LyricTimingLine {
@@ -110,6 +114,7 @@ public:
     Q_INVOKABLE void addLyricLine(const QString& text, qint64 startTimeMs, qint64 endTimeMs);
     Q_INVOKABLE void addWordTiming(int lineIndex, const QString& text, qint64 startTimeMs, qint64 endTimeMs);
     Q_INVOKABLE void updatePlaybackPosition(qint64 timestampMs);
+    Q_INVOKABLE double solveBezier(double x, double x1, double y1, double x2, double y2) const;
 
     // Core painting override
     virtual void paint(QPainter* painter) override;
@@ -135,6 +140,10 @@ private:
         qint64 endTime = 0;
         qreal leftX = 0;
         qreal rightX = 0;
+        double x1 = 0.25;
+        double y1 = 0.25;
+        double x2 = 0.75;
+        double y2 = 0.75;
     };
 
     struct RenderCache {
@@ -169,7 +178,9 @@ private:
     
     // Layout helpers
     int findActiveLineIndex(qint64 timestampMs) const;
+    double getContinuousFocusPosition(qint64 timestampMs) const;
     void syncWithEngine();
+    qreal calculateSweepX(const CachedLine& line, const QFont& font) const;
 
     // Component configuration
     int m_displayMode = BottomTwoLine;
